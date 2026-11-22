@@ -4,11 +4,30 @@
 WSTransport  -> competition protocol (serve.py holds the socket)
 LocalTransport -> dryrun against a local directory (no Docker needed)
 """
-import asyncio, base64, json, os, subprocess
+import asyncio, base64, json, os, shlex, subprocess, sys
+
+
+def quote_path(p):
+    """Quote a path for the shell that will actually run the command.
+
+    On Windows cmd.exe, an unquoted path with no spaces is safest: a command
+    starting with a quote can be mis-parsed by `cmd /c "<command>"`.
+    """
+    p = str(p)
+    if os.name == "nt":
+        return '"' + p + '"' if " " in p else p
+    return shlex.quote(p)
 
 
 class Transport:
     """Unified action surface used by the agent loop."""
+
+    # Inside the task container: python3 is on PATH, /tmp is writable (1 GiB).
+    python_cmd = "python3"
+
+    def scratch_path(self, name):
+        """Where the harness may drop helper files in the task container."""
+        return "/tmp/ple_" + name
 
     async def exec(self, command, timeout_sec=120):
         raise NotImplementedError
@@ -91,8 +110,15 @@ class WSTransport(Transport):
 class LocalTransport(Transport):
     """Dryrun backend: executes against a local task directory."""
 
+    # Use the very interpreter running the dryrun, so it works on Windows
+    # hosts too (no python3 shim, no MSYS /tmp path rewriting).
+    python_cmd = sys.executable
+
     def __init__(self, root):
         self.root = os.path.abspath(root)
+
+    def scratch_path(self, name):
+        return os.path.join(self.root, ".ple_scratch", "ple_" + name)
 
     def _abs(self, path):
         return path if os.path.isabs(path) else os.path.join(self.root, path.lstrip("./"))

@@ -7,16 +7,40 @@ Sequence the stub plays, on purpose including a bad path:
   3 finish            -> guard FAIL -> refused
   4 exec (fix: build a real docx)
   5 finish            -> guard PASS -> done
+
+The stub issues only `python helper.py <verb> <args>` commands, so the dryrun
+behaves the same on Windows hosts and inside the Linux evaluation container.
 """
 import argparse, asyncio, os, shutil, sys, tempfile, zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from skillkit.harness import Harness
-from skillkit.transport import LocalTransport
+from skillkit.transport import LocalTransport, quote_path
 from skillkit import specgen
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+HELPER = '''
+import os, sys
+verb = sys.argv[1]
+if verb == "probe":
+    print("cwd:", os.getcwd())
+    print("entries:", ", ".join(sorted(os.listdir("."))[:40]) or "(empty)")
+elif verb == "touch":
+    p = sys.argv[2]
+    os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
+    open(p, "wb").close()
+    print("touched", p)
+elif verb == "copy":
+    src, dst = sys.argv[2], sys.argv[3]
+    os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)
+    with open(src, "rb") as a:
+        data = a.read()
+    with open(dst, "wb") as b:
+        b.write(data)
+    print("copied", src, "->", dst, len(data), "bytes")
+'''
 
 
 def fake_docx(path, paras=9):
@@ -34,9 +58,15 @@ def fake_docx(path, paras=9):
 
 
 class StubModel:
-    def __init__(self, target, src_docx):
-        self.target, self.src, self.n = target, src_docx, 0
+    def __init__(self, target, src_docx, helper):
+        self.target, self.src, self.helper, self.n = target, src_docx, helper, 0
         self.usage = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+        self.py = quote_path(sys.executable)
+        self.h = quote_path(helper)
+
+    def _cmd(self, verb, *args):
+        parts = [self.py, self.h, verb] + [quote_path(a) for a in args]
+        return " ".join(parts)
 
     async def chat(self, messages, system, tools=None):
         self.n += 1
@@ -47,13 +77,13 @@ class StubModel:
                 {"id": f"s{i}", "name": name, "arguments": a}]}
 
         if i == 1:
-            return call("exec", command="ls -la; echo '--- task.md ---'; cat task.md 2>/dev/null | head -40")
+            return call("exec", command=self._cmd("probe"))
         if i == 2:
-            return call("exec", command=f"mkdir -p $(dirname '{self.target}') && : > '{self.target}'")
+            return call("exec", command=self._cmd("touch", self.target))
         if i == 3:
             return call("finish", final_message="Done, the file is there.")
         if i == 4:
-            return call("exec", command=f"cp {self.src} '{self.target}' && ls -l '{self.target}'")
+            return call("exec", command=self._cmd("copy", self.src, self.target))
         return call("finish", final_message=(
             f"What's in it: {os.path.basename(self.target)}\n"
             "What I decided: placeholder content written by the stub for the dryrun.\n"
@@ -84,12 +114,16 @@ async def main():
     rel = (spec["deliverable"] or "output/answer.docx").lstrip("/")
     spec["deliverable"] = rel
     target = os.path.join(tmp, rel)
-    fake_docx("/tmp/ple_stub_docx.docx")
+    helper = os.path.join(tmp, "_ple_stub_helper.py")
+    with open(helper, "w", encoding="utf-8") as f:
+        f.write(HELPER)
+    src_docx = os.path.join(tmp, "_ple_stub_docx.docx")
+    fake_docx(src_docx)
 
     print(f"workdir    : {tmp}")
     print(f"deliverable: {rel}  mode={spec['mode']} conf={spec['confidence']}")
 
-    h = Harness(LocalTransport(tmp), StubModel(target, "/tmp/ple_stub_docx.docx"),
+    h = Harness(LocalTransport(tmp), StubModel(target, src_docx, helper),
                 inst, workdir=tmp, log=print, spec_override=spec)
     final = await h.run(timeout_sec=120)
     print("\n=== FINAL MESSAGE ===")

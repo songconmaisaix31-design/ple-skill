@@ -77,9 +77,12 @@ async def solve(ws):
 
 async def main():
     port = int(os.environ.get("PORT", "8080"))
+    # The evaluator protocol requires no keepalive pings: one exec may run up
+    # to 600 s, and a ping timeout would drop the connection mid-command.
+    # docs/protocol.md: "Run your server without keepalive pings".
     async with websockets.serve(solve, "0.0.0.0", port,
                                 max_size=16 * 1024 * 1024,
-                                ping_interval=20, ping_timeout=60):
+                                ping_interval=None):
         print(f"listening on 0.0.0.0:{port}", flush=True)
         await asyncio.Future()
 

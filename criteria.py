@@ -8,12 +8,17 @@ if any GATE fails.
   python3 criteria.py                       # uses ./ and the local template clone
   python3 criteria.py --template <path>     # point at the competition template
 """
-import argparse, asyncio, glob, json, os, re, subprocess, sys, tempfile
+import argparse, asyncio, glob, json, os, re, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 RESULTS = []
+DEV_TASKS = 29          # size of the public dev set; fewer means data is missing
+
+
+def data_ready(tasks):
+    return len(tasks) >= DEV_TASKS
 
 
 def rec(cid, title, status, detail, layer="A"):
@@ -123,6 +128,10 @@ def truth_domains():
 
 
 def g05_skill_coverage(tasks, truth):
+    if not data_ready(tasks):
+        rec("G-05", "skill 覆盖 dev 题", "BLOCKED",
+            f"只有 {len(tasks)}/{DEV_TASKS} 题题面，判据不可信；请提供 ple-template 或 HF dev 数据", "D")
+        return False
     from skillkit import router
     dirs = {d for d in os.listdir(os.path.join(HERE, "skills"))
             if os.path.isdir(os.path.join(HERE, "skills", d))}
@@ -134,10 +143,14 @@ def g05_skill_coverage(tasks, truth):
         else:
             uncovered.append(t)
     return gate_pass("G-05", "skill 覆盖 dev 题", covered == len(tasks),
-                     f"{covered}/{len(tasks)} 有归属 skill" + (f"；缺 {uncovered}" if uncovered else ""))
+                     f"{covered}/{len(tasks)} 有归属 skill" + (f"；缺 {uncovered}" if uncovered else ""), "D")
 
 
 def g06_spec_paths(tasks):
+    if not data_ready(tasks):
+        rec("G-06", "specgen 路径解析 ≥ 25/29", "BLOCKED",
+            f"只有 {len(tasks)}/{DEV_TASKS} 题题面，阈值不得随数据量退化", "D")
+        return False
     from skillkit import specgen
     ok, low = 0, []
     for t, (inst, _) in tasks.items():
@@ -146,11 +159,15 @@ def g06_spec_paths(tasks):
             ok += 1
         else:
             low.append(t)
-    return gate_pass("G-06", "specgen 路径解析 ≥ 25/29", ok >= min(25, len(tasks)),
-                     f"{ok}/{len(tasks)} 命中" + (f"；未命中 {low}" if low else ""))
+    return gate_pass("G-06", "specgen 路径解析 ≥ 25/29", ok >= 25,
+                     f"{ok}/{len(tasks)} 命中" + (f"；未命中 {low}" if low else ""), "D")
 
 
 def g07_router(tasks, truth):
+    if not data_ready(tasks):
+        rec("G-07", "router 细领域判定 ≥ 23/29", "BLOCKED",
+            f"只有 {len(tasks)}/{DEV_TASKS} 题题面，阈值不得随数据量退化", "D")
+        return False
     from skillkit import router, specgen
     hit, miss = 0, []
     for t, (inst, _) in tasks.items():
@@ -160,8 +177,8 @@ def g07_router(tasks, truth):
             hit += 1
         elif want:
             miss.append(f"{t}({want}!={got})")
-    return gate_pass("G-07", "router 细领域判定 ≥ 23/29", hit >= min(23, len(tasks)),
-                     f"{hit}/{len(tasks)} 命中" + (f"；偏差 {miss}" if miss else ""))
+    return gate_pass("G-07", "router 细领域判定 ≥ 23/29", hit >= 23,
+                     f"{hit}/{len(tasks)} 命中" + (f"；偏差 {miss}" if miss else ""), "D")
 
 
 def g08_guard_regression(tasks):
@@ -185,12 +202,13 @@ def g08_guard_regression(tasks):
         runs += 1
         st, _ = asyncio.run(Guard(LocalTransport(base), base, spec).run())
         (good if st in ("PASS", "WARN") else bad).append(f"{t}:{st}")
-    if not runs:
-        rec("G-08", "guard 对 baseline 回归", "BLOCKED", "找不到 baseline artifacts")
+    if runs < DEV_TASKS:
+        rec("G-08", "guard 对 baseline 回归", "BLOCKED",
+            f"只找到 {runs}/{DEV_TASKS} 份 baseline artifacts，不能据此判 PASS", "D")
         return False
     need = 19
-    return gate_pass("G-08", f"guard 对 baseline 回归 ≥ {need}/{runs}", len(good) >= min(need, runs),
-                     f"{len(good)}/{runs} PASS/WARN" + (f"；未过 {bad}" if bad else ""))
+    return gate_pass("G-08", f"guard 对 baseline 回归 ≥ {need}/{runs}", len(good) >= need,
+                     f"{len(good)}/{runs} PASS/WARN" + (f"；未过 {bad}" if bad else ""), "D")
 
 
 def g09_dryrun():
@@ -205,11 +223,12 @@ def g09_dryrun():
 
 def g10_artifacts():
     p = os.path.join(HERE, "artifacts")
-    docker = subprocess.run(["bash", "-lc", "command -v docker"], capture_output=True).returncode == 0
+    docker = shutil.which("docker") is not None
     if not os.path.isdir(p):
         rec("G-10", "artifacts/ 覆盖 29 题且合规",
             "FAIL" if docker else "BLOCKED",
-            "未生成 —— 必须在有 Docker 的机器上跑 eval/run.py", "B")
+            "未生成 —— 在有 Docker 的机器上跑 eval/run.py" if docker else
+            "未生成 —— 本机连 Docker 都不可用", "B")
         return False
     tasks = [d for d in os.listdir(p) if os.path.isdir(os.path.join(p, d))]
     files = sum(len(fs) for _, _, fs in os.walk(p))
@@ -222,15 +241,15 @@ def g10_artifacts():
 
 def g11_known_blockers():
     """Criteria that need Docker + a real model. Reported, never silently assumed."""
-    docker = subprocess.run(["bash", "-lc", "command -v docker"], capture_output=True)
-    has_docker = docker.returncode == 0
-    key = bool(os.environ.get("MODEL_API_KEY") or os.environ.get("OPENAI_API_KEY"))
-    rec("T-01", "kit check 八阶段全过", "BLOCKED" if not has_docker else "TODO",
+    has_docker = shutil.which("docker") is not None
+    key = bool(os.environ.get("MODEL_PROXY_URL") or os.environ.get("MODEL_API_KEY")
+               or os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY"))
+    rec("T-01", "kit check 十阶段全过", "BLOCKED" if not has_docker else "TODO",
         "需要 Docker + uv + harbor==0.20.0", "B")
-    rec("T-02", "dev set 29 题 artifacts 被 kit artifacts 接受", "BLOCKED" if not has_docker else "TODO",
-        "需要 Docker 跑 eval/run.py", "B")
+    rec("T-02", "dev set 29 题 artifacts 被 kit artifacts 接受",
+        "BLOCKED" if not has_docker else "TODO", "需要 Docker 跑 eval/run.py", "B")
     rec("T-03", "真模型端到端跑通 serve.py", "BLOCKED" if not key else "TODO",
-        "需要 MODEL_BASE_URL + MODEL_API_KEY", "B")
+        "需要 MODEL_PROXY_URL/KEY 或 MODEL_BASE_URL + MODEL_API_KEY", "B")
     rec("T-04", "dev 分数 ≥ baseline 参照", "TODO", "依赖 T-02 与 T-03", "B")
     rec("F-01", "无按题指纹分支（人工复核）", "TODO",
         "router 只用领域词表与路径家族标签；specgen 只看题面文本，不按 task id 分支", "B")
@@ -245,8 +264,10 @@ def main():
 
     tasks = load_tasks(a.template)
     truth = truth_domains()
-    rec("INFO", "dev 题面可读", "PASS" if tasks else "FAIL",
-        f"{len(tasks)} 题 from {a.template}")
+    # Environment prerequisite, deliberately not part of GATE-A: a missing
+    # template must never be reported as a code failure or as a silent pass.
+    rec("INFO", "dev 题面可读（环境前置）", "PASS" if data_ready(tasks) else "BLOCKED",
+        f"{len(tasks)}/{DEV_TASKS} 题 from {a.template}", "E")
 
     g01_layout()
     g02_submission_yaml()
@@ -265,20 +286,24 @@ def main():
     for r in RESULTS:
         print(f"{r['id']:7s} {r['title']:{width}s} {r['layer']:2s} {r['status']:8s} {r['detail'][:110]}")
 
-    a = [r for r in RESULTS if r["layer"] == "A"]
-    b = [r for r in RESULTS if r["layer"] == "B"]
-    a_fail = [r for r in a if r["status"] == "FAIL"]
-    b_open = [r for r in b if r["status"] != "PASS"]
+    layers = {k: [r for r in RESULTS if r["layer"] == k] for k in "ADEB"}
+    a_fail = [r for r in layers["A"] if r["status"] != "PASS"]
+    d_open = [r for r in layers["D"] if r["status"] != "PASS"]
+    b_open = [r for r in layers["B"] if r["status"] != "PASS"]
     print(f"\nGATE-A 代码/仓库自洽（本地可完成）：{'PASS' if not a_fail else 'FAIL'} "
-          f"({len(a)-len(a_fail)}/{len(a)})")
+          f"({len(layers['A'])-len(a_fail)}/{len(layers['A'])})")
+    print(f"GATE-D dev 数据回归（需 ple-template）：{'PASS' if not d_open else 'OPEN'} "
+          f"({len(layers['D'])-len(d_open)}/{len(layers['D'])} 已过)")
     print(f"GATE-B 可提交（需 Docker + 真模型）：{'PASS' if not b_open else 'OPEN'} "
-          f"({len(b)-len(b_open)}/{len(b)} 已过)")
+          f"({len(layers['B'])-len(b_open)}/{len(layers['B'])} 已过)")
     if a_fail:
-        print("A 层未过：" + ", ".join(r["id"] for r in a_fail))
+        print("A 层未过：" + ", ".join(f"{r['id']}({r['status']})" for r in a_fail))
+    if d_open:
+        print("D 层未过：" + ", ".join(f"{r['id']}({r['status']})" for r in d_open))
     if b_open:
         print("B 层未过：" + ", ".join(f"{r['id']}({r['status']})" for r in b_open))
-    # 0 = 本地部分全过; 1 = 本地有硬伤; 2 = 本地过但还不能提交
-    return 1 if a_fail else (2 if b_open else 0)
+    # 0 = 全部通过; 1 = 本地代码有硬伤; 2 = 代码自洽但还不能提交
+    return 1 if a_fail else (2 if d_open or b_open else 0)
 
 
 if __name__ == "__main__":

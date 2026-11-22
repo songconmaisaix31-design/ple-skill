@@ -1,0 +1,18 @@
+# Default: never rewrite bytes. artifacts/ are graded by hash (manifest.json),
+# so any EOL normalization there would break the readiness review.
+* -text
+
+# Source files must stay LF: the evaluator runs install/serve under Linux bash,
+# and CRLF shell scripts break there. See eval/README.md (Platform notes).
+*.py    text eol=lf
+*.md    text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.json  text eol=lf
+*.txt   text eol=lf
+*.sh    text eol=lf
+*.toml  text eol=lf
+*.cfg   text eol=lf
+
+# Deliverables are byte-exact even when a name matches a rule above.
+artifacts/** -text
