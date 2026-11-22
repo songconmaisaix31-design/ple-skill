@@ -41,6 +41,9 @@ skills/
   _shared/             SKILL.md（五件套 / 约束台账 / 收尾三段式）+ validate.py（守卫）
   electrical/ structural/ mep/ civil/ misc/  各领域 SKILL.md + checklist.md（29 题全覆盖）
 requirements.txt       websockets==15.0.1  httpx==0.28.1
+criteria.py            可执行验收判据（GATE-A 本地 / GATE-B 可提交）
+GOAL.md                目标、里程碑、硬约束、非目标
+writeups/              5 篇技术叙事：为什么是这个形状、踩过的坑、还没证明的部分
 ```
 
 ## 三项指标（都在 29 道真实 dev 题上量过）
@@ -97,3 +100,15 @@ uv run python -m kit artifacts /path/to/this/repo
 3. specgen 的 4 道 no-path 题：改为"首轮 exec 读全 task.md 后重解析"，并把 house 模板
    文件名规则写进对应 skill。
 4. 把 guard 的 `zip_soft` 从 WARN 提升为按题面措辞决定的硬判（现在一律 soft）。
+
+## writeups
+
+`writeups/` 下是 5 篇，按顺序读：
+
+| # | 篇目 | 主题 |
+|---|---|---|
+| 00 | [交付物就是分数](writeups/00-why-this-shape.md) | 从 84 步与 96% cached 两个数字反推出"合同先行" |
+| 01 | [spec-first](writeups/01-spec-first.md) | 题面两种结构、两个正则坑（14→0→25） |
+| 02 | [守卫](writeups/02-guard.md) | 只查结构为什么够、命名空间双括号 bug、硬软分离、熔断 |
+| 03 | [路由](writeups/03-routing.md) | 合规启发式 vs 题面指纹的红线，20→23，以及 domain/subdomain 拆分 |
+| 04 | [成本与时钟](writeups/04-cost-and-clock.md) | cache_control、6 小时预算、提前收工 |
