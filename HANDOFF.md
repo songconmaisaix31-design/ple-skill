@@ -2,6 +2,8 @@
 
 > 交接时间：2026-11-23（GMT+8） · 交接对象：下一位接手者 / 下一轮会话
 > 本文件是**当前唯一的状态基准**。`README.md` 里的「runs the dev set」与「三项指标都在 29 道真实 dev 题上量过」是上一版设计稿的措辞：**指标来自对 baseline artifacts 的离线静态回归，不是本 harness 跑过 dev set**。以本文和 `GOAL.md` 为准。
+>
+> **执行环境约束（2026-11-23 追加）**：本机没有本地模型，只能用**云端模型 API + 云端 Coding Agent**。据此新增 **§11 纯云端方案**；§5 的阻塞项与 §7 的本机 WSL 假设已按该约束修订。**官方路线本来就是云端模型，不需要本地模型**——详见 §11.1。
 
 ---
 
@@ -10,12 +12,12 @@
 | 项 | 现状 |
 |---|---|
 | 代码 | ✅ 可编译、离线闭环自测通过、协议往返冒烟通过、已推送 GitHub |
-| `kit check` | ❌ **从未跑过**（需要 WSL2 + Docker + 模型凭据） |
+| `kit check` | ❌ **从未跑过**（需要一台能跑 Docker daemon 的 Linux 主机 + 模型代理，云端亦可，见 §11） |
 | 真模型端到端 | ❌ **从未跑过**（Anthropic 原生路径只做过编译级验证） |
 | `artifacts/` | ❌ **目录不存在**，必须由 `eval/run.py` 生成，禁止手写 |
 | dev 分数 | **0**（不是分数低，是没有产物） |
 | 距截止 | 2027-01-05 23:59:59，约 43 天 |
-| 当前最该做 | 解除 `wsl.exe` 黑名单 → 拿 HF / GCP 凭据 → `kit check` 打掉判 0 门槛 → 再上 dev set |
+| 当前最该做 | 选一台**能跑 Docker 的云主机** → 跑 `cloud-preflight.sh` → 起云端模型代理 → `kit check` 打掉判 0 门槛 → 再上 dev set（§11） |
 
 一句话：**设计完成度约 90%，工程验证完成度约 30%，提交完成度 0%。不要现在提交。**
 
@@ -30,7 +32,9 @@
 | 周期 / 奖金 | 2026-11-09 → **2027-01-05 23:59:59** / 400K USD（250K / 100K / 50K） | 官网 |
 | 题量 | 85 题 = 29 dev（公开）+ 56 hidden；dev 数据集 955 MB（12 checks / 14 rubric / 3 checks-judge） | 官网 / HF |
 | 提交形态 | **一个 GitHub commit**：`submission.yaml` + harness + **同一 commit** 的 `artifacts/`；构建时匿名 clone 该仓库 | `docs/rules.md`、`kit/README.md` |
-| 模型 | `submission.yaml` = `google-cloud/claude-opus-5-5`（8 个赞助模型之一）；本地经 `MODEL_PROXY_URL` + `MODEL_PROXY_KEY` 访问 Vertex AI | `docs/models.md` |
+| 模型 | `submission.yaml` = `google-cloud/claude-opus-5-5`（8 个赞助模型之一）；**模型始终在云端**，本地只需一个 LiteLLM 转发进程，经 `MODEL_PROXY_URL` + `MODEL_PROXY_KEY` 访问 | `docs/models.md` |
+| 自有云端 key | 官方明确允许「任意 LiteLLM / OpenAI-compatible 代理 serve 同名模型」，甚至举例「把 `claude-opus-5-5` 路由到自己的 Anthropic key」；**`model_api` 不改** | `docs/models.md` §Running google-cloud models on your machine |
+| 不能改的 | `anthropic/<model>` / `openai/<model>` / `gemini/<model>` / `openai-compatible/<model>` 都是 **local runs only**，`kit check` 永不报 `ready to submit` | `docs/models.md`、`kit/README.md` |
 | 资源 | serve 容器 2 CPU / 4 GB、每题 360 分钟、3 次提交机会；**本地** Docker Desktop 建议 ≥6 CPU / **≥16.25 GiB** | `docs/protocol.md`、`eval/README.md` |
 | 9 个 kit check 阶段 | submission.yaml / model-settings / files / build / model / listen / smoke / mcp / cancel / artifacts（GOAL.md 写「八个」是旧信息） | `kit/README.md` |
 | 榜单参照 | Opus 5.5 原生 harness 0.483 | 官网 leaderboard |
@@ -73,11 +77,13 @@ git status → 干净；无 API key / private key 泄漏（git grep 已扫）
 |---|---|
 | `docs/00-接手评估.md` | 接手时的完整现状评估（风险清单 P0/P1/P2、合规性核对、命令清单） |
 | `docs/01-修复与验证记录.md` | 修复前后对比、验证命令与输出结论、环境实测事实 |
-| `devtools/wsl-run.sh` | WSL2 侧一键脚本：`env` / `gcp` / `hf` / `check` / `dev` / `ready` |
+| `devtools/wsl-run.sh` | 通用 Linux 一键脚本（文件名沿用）：`env` / `gcp` / `hf` / `check` / `dev` / `ready`；WSL2 与云主机都能用 |
+| `devtools/cloud-preflight.sh` | **云端环境探测**：Docker daemon、CPU/内存/磁盘、网络、工具链，输出逐项结论 |
+| `devtools/litellm-selfhosted.yaml.example` | 自有云端 API key 的 LiteLLM 代理配置样例（B 档，见 §11.2） |
 | `devtools/protocol_smoke.py` | 不需要模型和 Docker 的 WebSocket 协议冒烟 |
 | `_ple_meta/ple-official`（工作区，**不在仓库内**） | 官方 kit 本地克隆，供离线查文档 |
 
-> 官方 `kit/build.py` import `fcntl` → **Windows Python 跑不了 kit**；`docker build` 用路径 context → Docker-in-Docker 也不可行。所以官方链路**只能在 WSL2 的 Linux 文件系统里跑**（`eval/README.md` Platform notes 明确写了这一点）。Windows 侧只能做离线自测。
+> 官方 `kit/build.py` import `fcntl` → **Windows Python 跑不了 kit**；`docker build` 用路径 context → Docker-in-Docker 也不成立。所以官方链路**必须在能跑 Docker daemon 的 Linux 文件系统里执行**（`eval/README.md` Platform notes）。这不一定是本机 WSL2 —— **一台云主机同样满足，且能绕开本机全部阻塞**（§11）。Windows 侧只能做离线自测。
 
 ---
 
@@ -90,7 +96,8 @@ git status → 干净；无 API key / private key 泄漏（git grep 已扫）
 | 真模型端到端未验证 | `skillkit/model.py` 的 Anthropic 原生 `tool_use` / `tool_result` 序列化、`cache_control` 只做编译级验证 | T-03 |
 | dev set 29 题未跑 | 无分数、无 `manifest.json`、无法 readiness | M2 |
 | F-01 合规复核未完成 | 见 §6，有**新发现** | P0 |
-| Docker 只有 8 CPU / 8.3 GiB | 全量 dev set 可能 OOM（官方要求 ≥16.25 GiB） | 环境 |
+| 本机 Docker 只有 8 CPU / 8.3 GiB | 全量 dev set 可能 OOM（官方要求 ≥16.25 GiB）；**改用云主机即可解除** | 环境 |
+| 云端执行环境未选定 / 未探测 | 决定 `kit check` 与 `eval/run.py` 能否跑起来；多数纯沙箱 Coding Agent **没有 Docker daemon** | P0，见 §11.3 |
 
 ---
 
@@ -100,10 +107,10 @@ git status → 干净；无 API key / private key 泄漏（git grep 已扫）
 
 | # | 任务 | 验收标准 |
 |---|---|---|
-| P0-1 | 解除 `wsl.exe` 安全策略黑名单，确认 `wsl.exe --status` 可用 | 能进 WSL2，且 `uname -r` 含 `WSL2` |
-| P0-2 | Docker Desktop → Settings → Resources → Memory ≥ 16.25 GiB、CPU ≥ 6，并打开 WSL2 integration | `docker info --format '{{.MemTotal}}'` ≥ 16 GiB |
+| P0-1 | 选定**能跑 Docker daemon 的云主机**（或 WSL2），克隆本仓库与官方 kit 到 Linux 文件系统 | `bash devtools/cloud-preflight.sh` 全绿 |
+| P0-2 | 云端 Docker 资源达标：≥6 CPU、**≥16.25 GiB RAM**、≈10 GB 空闲磁盘、`linux/amd64` | `docker info` 输出的内存 ≥16 GiB；`docker run --rm hello-world` 成功 |
 | P0-3 | 拿到 HF gated 数据集授权 + read token | `devtools/wsl-run.sh hf` 返回 `HTTP 200` |
-| P0-4 | 拿到 GCP project（启用 Vertex AI + 结算）+ `gcloud auth application-default login` | `devtools/wsl-run.sh gcp` 成功、proxy `/health/liveliness` 200 |
+| P0-4 | 起**云端模型代理**：A 档 Vertex AI（GCP + ADC）或 B 档自有云端 key 经 LiteLLM（§11.2 二选一） | `/health/liveliness` 200，且 `POST /v1/messages` 对 `claude-opus-5-5` 返回 200 |
 | P0-5 | **F-01 清理（新发现，优先级上调）**：`router.py` 运行时会把各 `skills/*/SKILL.md` 开头内容读进 system prompt，而 frontmatter `covers:` 直接列了 dev task id，等于把题面指纹喂给模型；`PLE_domain_skeleton.md` 还含 baseline 的具体结论数值 | 删掉 5 个 SKILL.md 的 `covers:` task id 列表，只保留领域格式惯例；把 skeleton 中的具体数值移出仓库或明确标注为格式样本；复核 `router.path_hint()` 的工作量路径家族 +9 权重 |
 | P0-6 | `kit check`（先跳过 smoke 打掉门槛，再跑全量） | 全量检查末行出现 **`ready to submit`** |
 | P0-7 | 真模型跑 1~2 题，验 Anthropic 路径并校准「第 10~20 步落第一版」 | `runs/<run>/attempt1/harbor.log` 无 400/序列化异常，`results.json` 有分 |
@@ -128,13 +135,16 @@ git status → 干净；无 API key / private key 泄漏（git grep 已扫）
 
 ---
 
-## 5. 阻塞项：需要人本人操作（我无法代做）
+## 5. 阻塞项：需要人本人操作（已按「纯云端」约束重排）
 
-1. **解除 `wsl.exe` 黑名单**：安全中心 → 命令安全 → 程序黑名单，移除 `wsl.exe`；可能需要重开会话。2026-11-23 复核仍被拦。
-2. **HuggingFace 登录与条款同意**：数据集 `google/physical-engineerings-last-exam` 是 gated，条款与「Agree and access」只对登录账号可见，同意时会把用户名/邮箱共享给 Google，必须本人操作。之后在 HF 设置里建 **Read** token。浏览器页可达，但 CLI 侧 `huggingface.co` 经代理 502 / 直连超时（需排查网络，或预先下载任务目录用 `--tasks-dir`）。
-3. **GCP**：提供 `VERTEXAI_PROJECT`（启用 Vertex AI + 结算账号），并在 WSL 里 `gcloud auth application-default login`。本机 `gcloud` 未安装、无任何 `MODEL_PROXY_*` 或自有模型 key。
-4. **Docker 内存**：当前 8.3 GiB，需调到 ≥16.25 GiB。
-5. **提交动作**：3 次机会是总量、同一时间只能有一次在队列；最终提交由本人在比赛站点操作（具体方式官方尚未公布）。
+| # | 阻塞 | 状态 / 解决方式 |
+|---|---|---|
+| 1 | **HuggingFace 登录与条款同意**（唯一绕不开的人工项） | 数据集 `google/physical-engineerings-last-exam` 是 gated，条款与「Agree and access」只对登录账号可见，同意时会把用户名/邮箱共享给 Google，必须本人操作；之后建 **Read** token。本机 CLI 侧 `huggingface.co` 经代理 502 / 直连超时，**换云主机后大概率自动解除**；仍不通则预先下载任务目录用 `--tasks-dir` |
+| 2 | **云端模型凭据，二选一** | A：GCP 项目 + Vertex AI + 结算 + `gcloud auth application-default login`；**或** B：任意一个云端模型 API key，经 LiteLLM 代理 serve `claude-opus-5-5`（官方明文允许，§11.2）。**不需要本地模型、不需要 GPU** |
+| 3 | **云主机 / Docker** | 必须有一台能真正跑 Docker daemon 的 Linux 主机（≥16.25 GiB RAM）。纯沙箱 Coding Agent 通常不满足，见 §11.3 选型表。本机 `wsl.exe` 黑名单与 8.3 GiB 内存问题**因此可以整体绕开**，不再是阻塞 |
+| 4 | **提交动作** | 3 次机会是总量、同一时间只能有一次在队列；最终提交由本人在比赛站点操作（具体方式官方尚未公布） |
+
+> 原「解除 `wsl.exe` 黑名单」「本机 Docker 调到 16 GiB」「必须装 gcloud」三项已从阻塞清单移除：改用云主机后它们都不再必要。
 
 ---
 
@@ -142,7 +152,9 @@ git status → 干净；无 API key / private key 泄漏（git grep 已扫）
 
 - [ ] **F-01**：不硬编码答案、不检测特定 task 来分支、harness 不读取 dev graders / reference files，也不在 build/run 时读取自己的 `artifacts/`。当前灰区见 P0-5。
 - [ ] **F-02**：`artifacts/` 必须由 `eval/run.py` 从**所提交的 harness**、用 `submission.yaml` 声明的 `model_api` 跑出；禁止手改、禁止别的模型/别的 harness 产出。
-- [ ] `submission.yaml` 的 `model_api` 必须与实际调用一致（违反即失格）。
+- [ ] `submission.yaml` 的 `model_api` 必须与实际调用一致（违反即失格）；**为了接自有云端 key 而改成 `anthropic/<model>` / `openai/<model>` 等于放弃提交资格**，代理可换、`model_api` 不可换（§11.4）。
+- [ ] **Coding Agent 只做开发 / 运维 / 提交代码，不能代替 harness 做题或生成 artifacts**（§11.4）。
+- [ ] 若走 B 档（自有 key 代理）产出 artifacts，正式提交前用 A 档 Vertex AI 重跑一遍，或向比赛方确认通道合规（§11.4 灰区）。
 - [ ] 仓库内**不得有任何 API key / private key**；`local.env` 只放 `~/ple-work/`，权限 600，绝不放进仓库。
 - [ ] 参赛仓库**根目录就是 entry**，所有内容已提交，工作区干净；`install` / `serve` 脚本 LF 行尾、`serve.py` / `dryrun.py` 保持 0755。
 - [ ] 只用 `model_api` 指定的端点，不绕过 egress proxy、不访问模型端点以外的网络、不检查 grading 脚本。
@@ -151,14 +163,17 @@ git status → 干净；无 API key / private key 泄漏（git grep 已扫）
 
 ---
 
-## 7. 运行手册（WSL2）
+## 7. 运行手册（任意 Linux + Docker：WSL2 或云主机）
+
+> 脚本名沿用 `wsl-run.sh`，但已泛化为不依赖 WSL / 不依赖 `/mnt/c`。**纯云端方案见 §11**（模型代理二选一、环境选型、三条红线），本节是通用命令层。
 
 ```bash
-# 在 WSL2 的 Linux 文件系统里（不要 /mnt/c），拿到脚本：
-S=~/ple-work/ple-skill/devtools/wsl-run.sh      # 或先从 Windows 侧复制
+# 在 Linux 文件系统里（云主机 ~/ 或 WSL2 ~/，不要 /mnt/c）
+bash devtools/cloud-preflight.sh                 # 先探测环境，缺什么一目了然
+S=devtools/wsl-run.sh
 bash $S env       # 生成 ~/ple-work/local.env（chmod 600，含随机 MODEL_PROXY_KEY）
-                  #   填 VERTEXAI_PROJECT、HF_TOKEN 两个 REPLACE_WITH_ 占位
-bash $S gcp       # gcloud ADC 登录（浏览器交互，本人操作）
+                  #   填 HF_TOKEN；A 档再填 VERTEXAI_PROJECT，B 档再填 ANTHROPIC_API_KEY
+bash $S gcp       # 仅 A 档需要：gcloud ADC 登录（浏览器交互，本人操作）
 bash $S hf        # 校验 HF gated 授权（HTTP 200）
 bash $S check     # uv sync + harbor + model_proxy + kit check --no-smoke --cancel-test
 bash $S dev       # 先 1~2 题验真模型，再全量 29 题，产出 artifacts/
@@ -170,8 +185,10 @@ bash $S ready     # kit artifacts + 全量 kit check（末行 ready to submit）
 ```bash
 cd ~/ple-work/ple-official
 uv tool install harbor==0.20.0 --with websockets && uv sync
+# A 档：官方 Vertex AI 代理
 MODEL_PROXY_HOST=0.0.0.0 MODEL_PROXY_PORT=4000 \
 VERTEXAI_PROJECT=<id> MODEL_PROXY_KEY=<key> kit/model_proxy/start.sh &
+# B 档：自有云端 key，改用 litellm + devtools/litellm-selfhosted.yaml.example（§11.2）
 uv run python -m kit check ~/ple-work/ple-skill --env-file ~/ple-work/local.env --no-smoke --cancel-test
 uv run python -m kit check ~/ple-work/ple-skill --env-file ~/ple-work/local.env
 uv run python eval/run.py ~/ple-work/ple-skill --env-file ~/ple-work/local.env \
@@ -189,13 +206,15 @@ python criteria.py                       # 缺 29 题数据时应报 BLOCKED，�
 python devtools/protocol_smoke.py        # 真实 WebSocket 往返
 ```
 
-`eval/run.py` 的 judge 优先级：`JUDGE_BASE_URL`+`JUDGE_API_KEY` → `MODEL_PROXY_URL`+`MODEL_PROXY_KEY`（本项目走这条）→ 自有模型 key；`JUDGE_MODEL` 默认 `claude-opus-5-5`。proxy 必须 bind `0.0.0.0`，否则 Linux 上 Docker bridge 连不到 `127.0.0.1`。
+`eval/run.py` 的 judge 优先级：`JUDGE_BASE_URL`+`JUDGE_API_KEY` → `MODEL_PROXY_URL`+`MODEL_PROXY_KEY`（本项目走这条）→ 自有模型 key；`JUDGE_MODEL` 默认 `claude-opus-5-5`，judge 任务会请求 **`<model>-judge`**，所以自制代理必须同时 serve `claude-opus-5-5-judge`（§11.2）。proxy 必须 bind `0.0.0.0`，否则 Linux 上 Docker bridge 连不到 `127.0.0.1`。
 
 ---
 
 ## 8. 定义完成（DoD）
 
 ```
+[ ] cloud-preflight.sh 全绿：Docker daemon / ≥16.25 GiB / 网络 / 工具链
+[ ] 模型代理就绪：/health/liveliness 200，/v1/messages 对 claude-opus-5-5 返回 200
 [ ] P0-5 F-01 清理已完成并复核
 [ ] wsl-run.sh check 全绿：build / listen / smoke / mcp / cancel 全过
 [ ] 真模型 1~2 题成功（Anthropic 原生路径无 400 / 无序列化异常）
@@ -204,6 +223,7 @@ python devtools/protocol_smoke.py        # 真实 WebSocket 往返
 [ ] 代码 + artifacts/ 同一 commit，git status 干净，无 key，LF + 0755 正确
 [ ] 全量 kit check 末行 "ready to submit"
 [ ] 仓库已推送 GitHub，匿名 clone 可拉取
+[ ] 若走 B 档，提交前已用 A 档重跑 artifacts 或已向比赛方确认
 [ ] 在比赛站点用一次提交机会正式提交（本人操作）
 ```
 
@@ -216,29 +236,110 @@ python devtools/protocol_smoke.py        # 真实 WebSocket 往返
 | 用途 | 位置 |
 |---|---|
 | 本仓库（GitHub） | `https://github.com/songconmaisaix31-design/ple-skill` |
-| 本仓库（Windows 本地） | `C:\Users\DW\WorkBuddy\2026-11-22-23-52-42\ple-skill` |
+| 本仓库（Windows 本地，仅离线开发） | `C:\Users\DW\WorkBuddy\2026-11-22-23-52-42\ple-skill` |
 | 工作区根目录（评估报告原件、官方 kit 克隆） | `C:\Users\DW\WorkBuddy\2026-11-22-23-52-42\` |
-| 官方 kit（WSL2） | `~/ple-work/ple-official`（`github.com/google-research/ple`） |
-| 参赛仓库（WSL2） | `~/ple-work/ple-skill`（**必须在 Linux 文件系统**） |
-| 密钥 | `~/ple-work/local.env`（600，绝不入库） |
+| 官方 kit（云主机 / WSL2） | `~/ple-work/ple-official`（`github.com/google-research/ple`） |
+| 参赛仓库（云主机 / WSL2） | `~/ple-work/ple-skill`（**必须在 Linux 文件系统**） |
+| 密钥（云主机侧） | `~/ple-work/local.env`（600，绝不入库）：`HF_TOKEN` / `MODEL_PROXY_KEY` / A 档 `VERTEXAI_PROJECT` 或 B 档 `ANTHROPIC_API_KEY` |
 | Kaggle | `ktdkydylc`；CLI 用 OAuth 登录，凭据在 `C:\Users\DW\.kaggle\credentials.json` |
 | GitHub | `songconmaisaix31-design`；`gh` 已登录（token scopes: repo / workflow / gist / read:org） |
 
 ## 10. 待决策 / 未决问题
 
+- **模型通道选 A 还是 B？**（§11.2）A 需 GCP 项目 + 结算但零争议；B 只需一个云端 API key，但产物通道存在评审疑义。
+- **云端 Coding Agent 具体是哪种环境？** 关键只看一件事：**能否跑 Docker daemon**（§11.3 选型表）。若无 Docker，只能让它改代码，eval 要交给另一台机器。
 - 最终提交仓库是否就直接用本仓库？官方要求「匿名可克隆的单个 commit」，本仓库为 public，符合；但 `docs/`（含 baseline 数值）与 `devtools/` 是工程笔记，**正式提交前建议精简或加合规说明**。
 - 比赛站点的**具体提交方式官方尚未公布**，需持续关注 `ple-bench.com`。
 - `ple-template`（原 Linux 环境的 29 题题面 + baseline artifacts）**不在本次解压包里**；README 的 25/29、23/29、17 PASS/2 WARN/5 FAIL 因此在本机无法复现。`criteria.py --template` 默认仍指向 `/home/user/work/ple-template`，有数据时应显式传路径。
 - 若 HF 网络始终不通，退路是预先下载任务目录后用 `eval/run.py --tasks-dir DIR`。
-- 本机 WSL2 / Docker / 凭据到位后，**优先跑 `check` 而不是 `dev`**；顺序反了会在没验证 build 的情况下白烧几小时机时。
+- 环境就绪后**优先跑 `check` 而不是 `dev`**；顺序反了会在没验证 build 的情况下白烧几小时机时。
+
+---
+
+## 11. 纯云端方案（无本地模型 / 无本机 WSL）
+
+> 2026-11-23 追加，对应约束：「没有本地模型，只能用云端模型 + 云端 Coding Agent」。
+> **结论：这个约束不构成障碍，反而一次性绕开了本机 `wsl.exe` 黑名单、8.3 GiB 内存、`fcntl` / Windows 三个坑。** 但引入三条新红线（§11.4）。
+
+### 11.1 先纠正误解：官方路线本来就是云端模型
+
+`kit/model_proxy/start.sh` 启动的是一个 **LiteLLM 转发进程**（无模型权重、CPU/内存开销极小），后端指向 Google **Vertex AI 云端**的 `claude-opus-5-5`；正式评测时 Google 的 model gateway 同理。所以**「没有本地模型」从来不是问题**，需要的只是「一个能访问云端模型端点的进程」。
+
+`docs/models.md`「Running google-cloud models on your machine」原文：
+
+> *"Any other LiteLLM or OpenAI-compatible proxy that serves those names works too (for example, routing `claude-opus-5-5` to your own Anthropic key), as long as it also speaks the native API your harness uses."*
+
+即：**`submission.yaml` 保持 `google-cloud/claude-opus-5-5` 不动**，`MODEL_PROXY_URL` 可以指向任何 serve 同名模型的代理，包括把 `claude-opus-5-5` 路由到你自己的云端 API key。**不需要 GCP 结算也能跑通 `kit check` 与 `eval/run.py`。**
+
+### 11.2 两条模型通道（二选一）
+
+| | **A：Vertex AI（最稳）** | **B：自有云端 API key（无 GCP 结算）** |
+|---|---|---|
+| 后端 | 官方 `kit/model_proxy/start.sh` + `VERTEXAI_PROJECT` + gcloud ADC | 自制 LiteLLM config，把 `claude-opus-5-5` 映射到自有 key |
+| 需要 | GCP 项目 + Vertex AI + 结算账号 | 一个云端模型 API key |
+| 与评测通道 | 完全一致 | 同款模型、不同计费通道 |
+| 提交争议 | 无 | ⚠️ 见 §11.4 第 3 条 |
+| 配置 | 官方 `kit/model_proxy/config.yaml` 现成 | `devtools/litellm-selfhosted.yaml.example` |
+
+**B 档的 4 个硬性技术条件**（否则 kit check 的 model / smoke 阶段直接失败）：
+
+1. 代理必须提供 **Anthropic Messages 原生端点 `POST /v1/messages`**。评测器对 Claude 模型注入 `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY`（`docs/models.md`「What your server receives」），`skillkit/model.py::from_env()` 因此置 `mode="anthropic"`。只支持 OpenAI Chat Completions 的网关会在这一步 404。
+2. 代理必须同时 serve **`claude-opus-5-5` 与 `claude-opus-5-5-judge`**。`eval/run.py` 在 rubric / checks-judge 任务上请求 `<model>-judge`，缺这条会 404。
+3. `general_settings.master_key` = `MODEL_PROXY_KEY`，与 `--env-file` 里的一致。
+4. 监听 **`0.0.0.0`**（不是 `127.0.0.1`），否则 Linux 上 Docker bridge 连不到。
+
+启动与自检（云主机）：
+
+```bash
+export MODEL_PROXY_KEY=$(openssl rand -hex 24)
+export ANTHROPIC_API_KEY=...        # 只进 local.env，绝不入库
+uv run --no-project --python 3.11 --with 'litellm[proxy]==1.90.0' litellm \
+  --config devtools/litellm-selfhosted.yaml.example --host 0.0.0.0 --port 4000 &
+
+curl -s http://127.0.0.1:4000/health/liveliness
+curl -s -H "Authorization: Bearer $MODEL_PROXY_KEY" \
+     -H 'content-type: application/json' -H 'anthropic-version: 2023-06-01' \
+     -d '{"model":"claude-opus-5-5","max_tokens":16,"messages":[{"role":"user","content":"ping"}]}' \
+     http://127.0.0.1:4000/v1/messages | head -c 300
+```
+
+> 若 LiteLLM 版本的 `/v1/messages` 不可用，换一个同时支持两种协议的网关，或把 `skillkit/model.py` 改走 OpenAI 兼容分支——**但改完必须重跑 `protocol_smoke.py`、全量 `kit check` 与全量 dev set**。
+
+### 11.3 云端 Coding Agent 的真正硬门槛是 Docker，不是模型
+
+`eval/run.py` 用 Harbor 0.20.0 起 build / serve / task / verifier 四类容器，需要**能真正运行 Docker daemon 的 Linux 主机**：≥6 CPU、**≥16.25 GiB RAM**、≈10 GB 空闲磁盘（镜像约 17 GB）、`linux/amd64`、能访问 `huggingface.co` / 模型端点 / `github.com`、能长时间运行（29 题 × 360 分钟）。
+
+| 云端环境 | 可行性 | 说明 |
+|---|---|---|
+| 云 VM（16–32 GiB，自装 Docker） | ✅ **最稳，推荐** | 先跑 `bash devtools/cloud-preflight.sh` |
+| 自建 / self-hosted Actions runner（有 Docker） | ✅ 可行 | 密钥放 CI secrets；注意单 job 6 h 上限，可按 task 拆 matrix |
+| GitHub Codespaces 32 GB + Docker-in-Docker | ⚠️ 可行但受限 | 需选大机型、确认 dockerd 可用、留意超时与计费 |
+| 纯沙箱 Coding Agent（在线 IDE / Claude Code web / Codex cloud，无 Docker daemon） | ❌ **不能跑 eval** | 只能用来**改代码 + commit/push**；`eval/run.py` 必须交给有 Docker 的机器 |
+
+### 11.4 三条不能踩的红线
+
+1. **Coding Agent 不能代替 harness 产出 artifacts**。F-02：`artifacts/` 必须由 `eval/run.py` 从**所提交的 harness**、用声明的 `model_api` 跑出，禁止手工创建，也禁止「让 Agent 自己解 29 道题再把文件塞进 `artifacts/`」。Coding Agent 的职责是开发 / 运维 / 排错 / 提交代码，不是做题。
+2. **不要为了方便把 `submission.yaml` 改成 `anthropic/<model>` / `openai/<model>` / `openai-compatible/<model>`**。`docs/models.md` 明确这些是 **local runs only**，`kit check` 对这类 entry **永远不会**报 `ready to submit`。代理可以换，`model_api` 不能换。
+3. **B 档的提交合规灰区要显式处理**。官方把「任意代理路由到自有 key」写在 local runs 一节；`rules.md` 只要求 `model_api` 与实际调用的模型一致、产物来自同一 harness。同款 Claude Opus 5.5 经自有 key 跑出的 artifacts 从文本上满足，但**存在评审疑义**。稳妥做法：B 档完成开发与全量 dev set，最终提交前用 A 档（Vertex AI）重跑一遍 artifacts；或先在比赛方 FAQ / 讨论区确认。**不要默认它一定没问题。**
+
+### 11.5 云端执行顺序
+
+1. 云主机上 `git clone` 本仓库 + `google-research/ple`，都放 Linux 文件系统。
+2. `bash devtools/cloud-preflight.sh` → 确认 Docker / 内存 / 网络 / 工具链。
+3. `bash devtools/wsl-run.sh env` → 填 `HF_TOKEN`、`MODEL_PROXY_KEY`；A 档另填 `VERTEXAI_PROJECT`，B 档另填 `ANTHROPIC_API_KEY`（都在 `local.env`，权限 600，绝不入库）。
+4. 起代理（A：官方 `start.sh`；B：§11.2 命令），自检 `/health/liveliness` 与 `/v1/messages`。
+5. `bash devtools/wsl-run.sh hf` → `check` → 真模型 1~2 题 → `dev` → `ready`。
+6. `git add artifacts && git commit && git push`，代码与产物**同一个 commit**。
+7. 全量 `kit check` 末行 `ready to submit` 后，才动用提交机会。
 
 ---
 
 ## 附：不要做的事
 
 - 不要手工创建或编辑 `artifacts/` 里任何文件（F-02 直接失格）。
-- 不要用 `openai/<model>` / 自有 key 的本地 run 产物冒充正式产物（`model_api` 必须一致）。
+- 不要让云端 Coding Agent 代替 harness 做题或生成产物（§11.4）。
+- 不要把 `submission.yaml` 的 `model_api` 改成 `anthropic/` / `openai/` / `openai-compatible/` 以接自有 key（会永久失去提交资格）；代理可换、声明不能换。
 - 不要在改完 harness 后沿用旧 artifacts。
-- 不要把 `local.env`、`HF_TOKEN`、`MODEL_PROXY_KEY`、Kaggle `credentials.json` 提交进任何仓库。
+- 不要把 `local.env`、`HF_TOKEN`、`ANTHROPIC_API_KEY`、`MODEL_PROXY_KEY`、Kaggle `credentials.json` 提交进任何仓库。
 - 不要在 Windows 上跑官方 kit / 做最终构建。
 - 不要相信 `criteria.py` 在缺 29 题数据时的 PASS（已修，但仍应看输出状态而不是只看退出码）。

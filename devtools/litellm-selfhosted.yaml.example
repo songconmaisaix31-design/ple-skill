@@ -1,0 +1,61 @@
+# B 档模型代理配置样例 —— 用自有云端 API key 跑 dev set。
+#
+# 用途：不想开 GCP / Vertex AI 结算时，把 `claude-opus-5-5` 路由到自己的云端 key。
+# 官方依据：docs/models.md "Running google-cloud models on your machine" 明确允许
+#   "Any other LiteLLM or OpenAI-compatible proxy that serves those names works too
+#    (for example, routing claude-opus-5-5 to your own Anthropic key)"。
+#
+# !! submission.yaml 的 model_api 必须保持 google-cloud/claude-opus-5-5，不要改成
+#    anthropic/<model> / openai/<model>（那些是 local runs only，永远无法 ready to submit）。
+#
+# 用法（见 HANDOFF.md §11.2）：
+#   cp devtools/litellm-selfhosted.yaml.example ~/ple-work/litellm.yaml
+#   export MODEL_PROXY_KEY=$(openssl rand -hex 24)
+#   export ANTHROPIC_API_KEY=<你的云端 key>     # 只放 local.env，绝不入库
+#   PLE_PROXY_BACKEND=selfhosted PLE_PROXY_CONFIG=~/ple-work/litellm.yaml \
+#       bash devtools/wsl-run.sh proxy
+#
+# 相比官方 kit/model_proxy/config.yaml，这里刻意去掉了 effort_default / judge_fallback
+# 两个官方自定义 callback（它们是 kit 仓库内的 Python 模块，独立部署时不可用）。
+
+model_list:
+  # harness 实际调用的模型名。drop_params: false 是为了保留 Claude 的
+  # cache_control / tool_use 等原生参数（官方 config 对 Claude 也是这么做的）。
+  - model_name: claude-opus-5-5
+    litellm_params:
+      model: anthropic/claude-opus-5-5        # 按你的 provider 改成实际模型 id
+      api_key: os.environ/ANTHROPIC_API_KEY
+      drop_params: false
+
+  # eval/run.py 在 rubric / checks-judge 任务上请求 "<model>-judge"。
+  # 缺这一条，17 道需要 judge 的题会全部 404。
+  - model_name: claude-opus-5-5-judge
+    litellm_params:
+      model: anthropic/claude-opus-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+      drop_params: false
+
+  # 若你的云端 key 是 OpenAI 兼容服务而不是 Anthropic，改成下面这种写法，
+  # 并同步确认 harness 能走 OpenAI 兼容分支（skillkit/model.py::from_env）：
+  # - model_name: claude-opus-5-5
+  #   litellm_params:
+  #     model: openai/<provider-model-id>
+  #     api_base: os.environ/MODEL_PROVIDER_BASE_URL
+  #     api_key: os.environ/MODEL_PROVIDER_API_KEY
+
+litellm_settings:
+  drop_params: true
+  num_retries: 3
+  request_timeout: 1800          # 官方一致；慢推理不要过早超时
+
+general_settings:
+  master_key: os.environ/MODEL_PROXY_KEY   # 必须与 --env-file 里的 MODEL_PROXY_KEY 一致
+
+# 启动后必做的两项自检：
+#   curl -s http://127.0.0.1:4000/health/liveliness
+#   curl -s -H "Authorization: Bearer $MODEL_PROXY_KEY" \
+#        -H 'content-type: application/json' -H 'anthropic-version: 2023-06-01' \
+#        -d '{"model":"claude-opus-5-5","max_tokens":16,"messages":[{"role":"user","content":"ping"}]}' \
+#        http://127.0.0.1:4000/v1/messages
+# 第二项若 404，说明该 LiteLLM 版本没有 Anthropic Messages 兼容端点 —— 需要换网关
+# 或把 skillkit/model.py 切到 OpenAI 兼容分支（改代码后必须重跑全量 dev set）。
