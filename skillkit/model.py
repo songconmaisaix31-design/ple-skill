@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""Model client. One OpenAI-compatible path, one Anthropic-native path.
+
+The Anthropic path exists for one reason: prompt caching. Leaked into the
+96%-cached-prompt profile of the dev tasks, an uncached harness pays
+10-40x the input cost per turn.
+"""
+import asyncio, json, os, random
+
+try:
+    import httpx
+except ImportError:  # pragma: no cover
+    httpx = None
+
+TOOLS = [
+    {"name": "exec",
+     "description": "Run a bash command in the task container, starting in the workdir. "
+                    "Only filesystem state persists between calls. Use python3 (python-docx, "
+                    "openpyxl, pandas, libreoffice and pdftotext are installed) for anything "
+                    "structural: building docx/xlsx, unzipping inputs, parsing PDFs.",
+     "parameters": {"type": "object",
+                    "properties": {"command": {"type": "string"},
+                                   "timeout_sec": {"type": "integer", "default": 120}},
+                    "required": ["command"]}},
+    {"name": "read_file",
+     "description": "Read a file from the task container. Returns utf-8 text when the bytes "
+                    "decode cleanly, otherwise base64 with a marker. 10 MB cap.",
+     "parameters": {"type": "object", "properties": {"path": {"type": "string"}},
+                    "required": ["path"]}},
+    {"name": "write_file",
+     "description": "Write text (or base64 when `b64` is true) to a path in the task container. "
+                    "Parent directories are created. Use this for the final deliverable too.",
+     "parameters": {"type": "object",
+                    "properties": {"path": {"type": "string"}, "content": {"type": "string"},
+                                   "append": {"type": "boolean", "default": False},
+                                   "b64": {"type": "boolean", "default": False}},
+                    "required": ["path", "content"]}},
+    {"name": "mcp_call",
+     "description": "Send an HTTP request to one of the task's declared MCP servers "
+                    "(streamable HTTP, JSON-RPC). Use it for records the task keeps in an "
+                    "external app (OpenProject, issue trackers, etc).",
+     "parameters": {"type": "object",
+                    "properties": {"method": {"type": "string", "default": "POST"},
+                                   "url": {"type": "string"},
+                                   "headers": {"type": "object"},
+                                   "body": {"type": "string"}},
+                    "required": ["url"]}},
+    {"name": "finish",
+     "description": "End the task. `final_message` is graded by the rubric judge: say what "
+                    "you produced, where every file is saved, the governing values you used, "
+                    "and the choices that could cost credit.",
+     "parameters": {"type": "object", "properties": {"final_message": {"type": "string"}},
+                    "required": ["final_message"]}},
+]
+
+
+class ModelClient:
+    def __init__(self, model_name, base_url, api_key, mode="openai",
+                 max_tokens=8000, reasoning_effort=None, log=None):
+        self.model = model_name
+        self.base_url = (base_url or "").rstrip("/")
+        self.api_key = api_key
+        self.mode = mode
+        self.max_tokens = max_tokens
+        self.reasoning_effort = reasoning_effort
+        self.log = log or (lambda t: None)
+        self.usage = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+
+    # ---------- request bodies ----------
+    def _to_anthropic(self, messages):
+        out = []
+        for m in messages:
+            role = m["role"]
+            if role == "assistant":
+                blocks = []
+                if m.get("content"):
+                    blocks.append({"type": "text", "text": m["content"]})
+                for tc in m.get("tool_calls") or []:
+                    blocks.append({"type": "tool_use", "id": tc["id"], "name": tc["name"],
+                                   "input": tc.get("arguments") or {}})
+                out.append({"role": "assistant", "content": blocks or [{"type": "text", "text": "(ok)"}]})
+            elif role == "tool":
+                out.append({"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": m["tool_call_id"],
+                     "content": m.get("content") or ""}]})
+            else:
+                out.append({"role": "user", "content": [{"type": "text", "text": m.get("content") or ""}]})
+        # cache the newest message: the only growing part below the system prompt
+        if out and out[-1]["role"] == "user" and out[-1]["content"]:
+            last = out[-1]["content"][-1]
+            if last.get("type") == "text":
+                last["cache_control"] = {"type": "ephemeral"}
+            elif last.get("type") == "tool_result":
+                last["cache_control"] = {"type": "ephemeral"}
+        return out
+
+    def _to_openai(self, messages):
+        out = []
+        for m in messages:
+            d = {"role": m["role"], "content": m.get("content")}
+            if m.get("tool_calls"):
+                d["tool_calls"] = [{"id": tc["id"], "type": "function",
+                                    "function": {"name": tc["name"],
+                                                 "arguments": json.dumps(tc.get("arguments") or {})}}
+                                   for tc in m["tool_calls"]]
+                d["content"] = m.get("content") or None
+            if m["role"] == "tool":
+                d = {"role": "tool", "tool_call_id": m["tool_call_id"],
+                     "content": m.get("content") or ""}
+            out.append(d)
+        return out
+
+    async def chat(self, messages, system, tools=None):
+        tools = tools or TOOLS
+        payload = await self._request(messages, system, tools)
+        return payload
+
+    async def _request(self, messages, system, tools):
+        if httpx is None:
+            raise RuntimeError("httpx missing")
+        headers = {"content-type": "application/json"}
+        if self.mode == "anthropic":
+            url = self.base_url + "/v1/messages"
+            headers["x-api-key"] = self.api_key or ""
+            headers["anthropic-version"] = "2023-06-01"
+            body = {"model": self.model, "max_tokens": self.max_tokens,
+                    "system": [{"type": "text", "text": system,
+                                "cache_control": {"type": "ephemeral"}}],
+                    "messages": self._to_anthropic(messages),
+                    "tools": [{"name": t["name"], "description": t["description"],
+                               "input_schema": t["parameters"]} for t in tools]}
+        else:
+            url = self.base_url + "/chat/completions" if self.base_url.endswith("/v1") \
+                else self.base_url + "/v1/chat/completions"
+            headers["authorization"] = "Bearer " + (self.api_key or "")
+            body = {"model": self.model, "max_tokens": self.max_tokens,
+                    "messages": [{"role": "system", "content": system}] + self._to_openai(messages),
+                    "tools": [{"type": "function", "function": t} for t in tools],
+                    "tool_choice": "auto"}
+            if self.reasoning_effort:
+                body["reasoning_effort"] = self.reasoning_effort
+
+        last_err = None
+        for attempt in range(5):
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(600, connect=30),
+                                             trust_env=True) as c:
+                    r = await c.post(url, headers=headers, json=body)
+                    if r.status_code in (429, 500, 502, 503, 504):
+                        last_err = f"{r.status_code} {r.text[:200]}"
+                        await asyncio.sleep(min(2 ** attempt + random.random(), 30))
+                        continue
+                    if r.status_code >= 400:
+                        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:400]}")
+                    return self._normalise(r.json())
+            except RuntimeError:
+                raise
+            except Exception as e:
+                last_err = repr(e)
+                await asyncio.sleep(min(2 ** attempt + random.random(), 30))
+        raise RuntimeError(f"model call failed after retries: {last_err}")
+
+    def _normalise(self, data):
+        if self.mode == "anthropic":
+            blocks = data.get("content") or []
+            text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+            calls = [{"id": b["id"], "name": b["name"], "arguments": b.get("input") or {}}
+                     for b in blocks if b.get("type") == "tool_use"]
+            u = data.get("usage") or {}
+            usage = {"input_tokens": u.get("input_tokens", 0),
+                     "output_tokens": u.get("output_tokens", 0),
+                     "cache_read_tokens": u.get("cache_read_input_tokens", 0)}
+        else:
+            ch = (data.get("choices") or [{}])[0].get("message") or {}
+            text = ch.get("content") or ""
+            calls = []
+            for tc in ch.get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                try:
+                    args = json.loads(fn.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                calls.append({"id": tc.get("id") or f"c{len(calls)}",
+                              "name": fn.get("name"), "arguments": args})
+            u = data.get("usage") or {}
+            usage = {"input_tokens": u.get("prompt_tokens", 0),
+                     "output_tokens": u.get("completion_tokens", 0),
+                     "cache_read_tokens": (u.get("prompt_tokens_details") or {}).get("cached_tokens", 0)}
+        for k in self.usage:
+            self.usage[k] += usage.get(k, 0)
+        return {"content": text, "tool_calls": calls, "usage": usage}
+
+
+def from_env(log=None):
+    api = os.environ.get("MODEL_API", "")
+    model = os.environ.get("MODEL_NAME") or api.split("/")[-1] or "unknown"
+    base = os.environ.get("MODEL_BASE_URL") or ""
+    key = os.environ.get("MODEL_API_KEY") or ""
+    mode = "openai"
+    if "claude" in model.lower() and os.environ.get("ANTHROPIC_BASE_URL"):
+        base = os.environ["ANTHROPIC_BASE_URL"]
+        key = os.environ.get("ANTHROPIC_API_KEY") or key
+        mode = "anthropic"
+    if not base:
+        base = os.environ.get("OPENAI_BASE_URL", "")
+    return ModelClient(model, base, key, mode=mode, log=log)

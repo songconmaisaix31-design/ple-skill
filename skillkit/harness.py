@@ -1,0 +1,260 @@
+#!/usr/bin/env python3
+"""The agent loop.
+
+Shape: spec first (the acceptance contract is written before the model sees
+anything), skill routed second, one minimal complete deliverable early, then
+guard-driven iteration until the guard passes or time runs out.
+"""
+import json, os, time
+
+from . import specgen, router
+from .guard import Guard
+
+MAX_STEPS = 240
+HARD_BUDGET = 0.94      # fraction of agent_timeout_sec we allow ourselves
+WRAP_BUDGET = 0.80      # switch to "close it out" mode
+
+SYSTEM_BASE = """You are an agent harness solving one engineering task inside a sandboxed container.
+
+You do not chat. You produce deliverables and put them at the exact path the task names.
+The grader reads only file paths, names, formats and contents; a rubric judge also reads your
+final_message. Nothing else you say counts.
+
+Non-negotiables:
+- The acceptance contract below is the highest authority. Exact filenames, exact column
+  headers, exact member files. A perfect memo at the wrong path scores zero.
+- Work inside the task container with exec/read_file/write_file/mcp_call. python3 is present
+  with python-docx, openpyxl, pandas, libreoffice and pdftotext.
+- Read the task inputs before writing. Reconcile conflicting documents explicitly and say
+  which one governs.
+- Land a first complete, openable version of the deliverable early (by roughly step 10-20),
+  even if values are rough, then rewrite it in place. Never let the clock expire with
+  nothing on disk.
+- Every number you assert must come from a document you actually read or a calculation you
+  actually ran. Never invent a clause number, a section reference or a test result.
+- Do not hard-code answers or branch on a task's identity. Solve the task in front of you.
+
+Tool notes:
+- exec keeps only filesystem state; cd and shell variables do not persist.
+- write_file creates parent directories. Use append for large files.
+- Build docx/xlsx with python-docx/openpyxl scripts you write, then run them with exec.
+"""
+
+
+def _fmt_contract(spec):
+    lines = []
+    d = spec.get("deliverable")
+    lines.append("deliverable path: " + (d or "(not stated in the instruction - read task.md, "
+                                          "look for a house template, then state your choice)"))
+    lines.append(f"delivery mode: {spec.get('mode')}")
+    if spec.get("zip_required"):
+        lines.append("required members: " + ", ".join(spec["zip_required"]))
+    for name, cols in (spec.get("csv_headers") or {}).items():
+        lines.append(f"{name} columns, exactly: " + ", ".join(cols))
+    other = [n for n in (spec.get("all_named_files") or [])
+             if n != d and n not in (spec.get("zip_required") or [])]
+    if other:
+        lines.append("also named in the instruction: " + ", ".join(other[:14]))
+    if spec.get("confidence") == "low":
+        lines.append("WARNING: the deliverable path was not stated. Establish it first "
+                     "(cat task.md, look for a house template, follow 'Save it as ...').")
+    return "\n".join(lines)
+
+
+class Harness:
+    def __init__(self, transport, model, instruction, workdir="/app",
+                 limits=None, mcp_servers=None, log=None, spec_override=None):
+        self.t = transport
+        self.model = model
+        self.instruction = instruction
+        self.workdir = workdir or "/app"
+        self.limits = limits or {}
+        self.mcp = mcp_servers or []
+        self.log = log or (lambda t: None)
+        self.spec = spec_override or specgen.build(instruction)
+        self.route = router.route(instruction, self.spec)
+        self.guard = Guard(transport, workdir, self.spec, log=self.log)
+        self.final = ""
+        self.steps = 0
+        self._since_guard = 99
+        self._guard_fails = 0
+        self._ctx = router.load_context(self.route["domain"])
+
+    # ---------- prompt ----------
+    def _system(self, snapshot, wrap=False):
+        parts = [SYSTEM_BASE]
+        parts.append("\n=== ACCEPTANCE CONTRACT (auto-parsed from the instruction) ===\n"
+                     + _fmt_contract(self.spec))
+        parts.append(f"\n=== ROUTED SKILL: {self.route['domain']} / {self.route['family']} ===")
+        for title, body in self._ctx:
+            parts.append(f"\n--- {title} ---\n{body}")
+        if self.mcp:
+            urls = "\n".join(f"  {s.get('name')}: {s.get('url')} ({s.get('transport')})"
+                             for s in self.mcp)
+            parts.append("\n=== MCP SERVERS (reachable only through mcp_call) ===\n" + urls)
+        if wrap:
+            parts.append("\n=== WRAP-UP MODE ===\nThe budget is nearly gone. Stop exploring. "
+                         "Make sure the deliverable at the contract path is complete, valid and "
+                         "readable, then call finish with a summary.")
+        parts.append("\n=== WORKSPACE SNAPSHOT (taken by the harness before you started) ===\n"
+                     + snapshot)
+        return "\n".join(parts)
+
+    async def _snapshot(self):
+        cmd = ("echo '--- task.md ---'; cat task.md 2>/dev/null | head -c 6000; "
+               "echo; echo '--- tree ---'; ls -la; "
+               "find . -maxdepth 3 -type f 2>/dev/null | head -120")
+        r = await self.t.exec(cmd, 120)
+        out = r.get("output", "")[:7000]
+        # the real requirements often live in task.md, not the instruction
+        if "--- task.md ---" in out:
+            head = out.split("--- tree ---")[0]
+            if len(head) > 120:
+                merged = specgen.build(self.instruction, head)
+                if merged.get("deliverable") or merged.get("all_named_files"):
+                    self.spec = merged
+                    self.guard.spec = dict(merged)
+                    self.guard.spec.setdefault("deep", True)
+        return out
+
+    # ---------- tools ----------
+    async def _do(self, call):
+        name = call["name"]
+        a = call.get("arguments") or {}
+        if name == "exec":
+            r = await self.t.exec(a.get("command", ""), a.get("timeout_sec", 120))
+            body = (r.get("output") or "")[:14000]
+            tag = "" if r.get("ok") else f"[exit {r.get('exit_code')}] "
+            return f"{tag}{body}"
+        if name == "read_file":
+            data = await self.t.read_file(a.get("path", ""))
+            if data is None:
+                return "[read_file] not found: " + str(a.get("path"))
+            try:
+                txt = data.decode("utf-8")
+                return txt[:14000] + ("\n[truncated]" if len(txt) > 14000 else "")
+            except UnicodeDecodeError:
+                return "[binary, %d bytes]" % len(data)
+        if name == "write_file":
+            content = a.get("content", "")
+            if a.get("b64"):
+                import base64
+                blob = base64.b64decode(content)
+            else:
+                blob = content.encode()
+            r = await self.t.write_file(a.get("path", ""), blob, a.get("append", False))
+            self._since_guard = min(self._since_guard, 0)
+            if r.get("ok") is False:
+                return "[write_file] failed: " + str(r.get("error"))
+            return f"[write_file] ok {r.get('size', len(blob))} bytes -> {a.get('path')}"
+        if name == "mcp_call":
+            hdrs = a.get("headers") or {"content-type": "application/json",
+                                        "accept": "application/json, text/event-stream"}
+            r = await self.t.http(a.get("method", "POST"), a.get("url", ""), hdrs,
+                                  (a.get("body") or "").encode())
+            body = (r.get("body_b64") or "")
+            import base64 as _b
+            try:
+                txt = _b.b64decode(body).decode("utf-8", "replace")
+            except Exception:
+                txt = str(body)
+            return f"[http {r.get('status')}] {txt[:8000]}"
+        return f"[unknown tool] {name}"
+
+    # ---------- loop ----------
+    async def run(self, timeout_sec=21600, on_usage=None, on_log=None):
+        on_log = on_log or self.log
+        start = time.time()
+        deadline = start + timeout_sec * HARD_BUDGET
+
+        snapshot = await self._snapshot()
+        on_log(f"spec: {self.spec.get('deliverable')} mode={self.spec.get('mode')} "
+               f"conf={self.spec.get('confidence')} | skill={self.route['domain']}"
+               f"/{self.route['family']}")
+
+        messages = [{"role": "user",
+                     "content": "Task instruction:\n\n" + self.instruction
+                                + "\n\nBegin. First read the inputs you need, then build."}]
+
+        asked = 0
+        while self.steps < MAX_STEPS:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                on_log("hard deadline hit")
+                break
+            wrap = remaining < timeout_sec * (1 - WRAP_BUDGET)
+            system = self._system(snapshot, wrap=wrap)
+            try:
+                resp = await self.model.chat(messages, system)
+            except Exception as e:
+                on_log(f"model error: {e}")
+                break
+            self.steps += 1
+            if on_usage:
+                on_usage(resp["usage"])
+            calls = resp.get("tool_calls") or []
+            messages.append({"role": "assistant", "content": resp.get("content", ""),
+                             "tool_calls": calls})
+
+            if not calls:
+                asked += 1
+                if asked >= 3:
+                    on_log("model stopped calling tools; forcing finish")
+                    break
+                messages.append({"role": "user",
+                                 "content": "Keep going with tools. The deliverable is not "
+                                            "confirmed yet - call a tool, or call finish if it "
+                                            "really is complete."})
+                continue
+
+            finish_req = None
+            for call in calls:
+                if call["name"] == "finish":
+                    finish_req = call
+                    continue
+                obs = await self._do(call)
+                messages.append({"role": "tool", "tool_call_id": call["id"], "content": obs})
+
+            # guard: only when something was actually written since the last check
+            if self._since_guard >= 0:
+                self._since_guard += 1
+            else:
+                self._since_guard = 0
+            if self._since_guard == 2 and finish_req is None:
+                status, rep = await self.guard.run()
+                on_log(f"guard: {status}")
+                self._since_guard = 99
+                if status in ("FAIL", "ERROR") and self._guard_fails < 2:
+                    self._guard_fails += 1
+                    messages.append({"role": "user",
+                                     "content": "GUARD FAILED for the contract path. Fix these "
+                                                "before anything else:\n" + rep})
+
+            if finish_req is not None:
+                status, rep = await self.guard.run()
+                on_log(f"guard at finish: {status}")
+                self.final = (finish_req.get("arguments") or {}).get("final_message", "")
+                if status in ("FAIL", "ERROR"):
+                    self._guard_fails += 1
+                    if self._guard_fails < 3:
+                        messages.append({"role": "tool", "tool_call_id": finish_req["id"],
+                                         "content": "REFUSED. The deliverable does not satisfy "
+                                                    "the contract yet:\n" + rep + "\nFix it, "
+                                                    "then finish again."})
+                        self.final = ""
+                        self._since_guard = 99
+                        continue
+                    # three refusals: the contract itself may be wrong (the task may
+                    # accept a different name than the parser inferred). Ship it with
+                    # the discrepancy stated rather than spin out the clock.
+                    on_log("guard refused three times; shipping with a stated discrepancy")
+                    self.final = ("CONTRACT DISCREPANCY - the parser-inferred path could not be "
+                                  "satisfied:\n" + rep[-900:] + "\n\n" + self.final)
+                break
+            self._since_guard = 99 if self._since_guard == 99 else self._since_guard
+
+        if not self.final:
+            status, rep = await self.guard.run()
+            self.final = ("Deliverable: " + str(self.spec.get("deliverable")) +
+                          f"\nGuard at exit: {status}\n" + rep[-1200:])
+        return self.final
