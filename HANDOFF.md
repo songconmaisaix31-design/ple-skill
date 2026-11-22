@@ -48,7 +48,7 @@ Kaggle 只提供 `NOTE.md`（「no provided dataset」）。**dev 题面与 grad
 | `17408a5` | v1 主体：spec-first harness（specgen / router / guard / transport / model / skills / dryrun / criteria） |
 | `a58b197` | 5 篇 writeups |
 | `084a58b` | **修复提交**（详见 `docs/01-修复与验证记录.md`） |
-| 本次文档提交 | `HANDOFF.md` / `docs/` / `devtools/` / README 状态说明 |
+| `05f90e3` | 文档提交：`HANDOFF.md` / `docs/` / `devtools/` / README 状态说明（已推送） |
 
 `084a58b` 修掉的 5 个问题：
 1. `serve.py`：`ping_interval=20, ping_timeout=60` → **`ping_interval=None`**。官方 `docs/protocol.md` 明确要求关闭 keepalive（单条 `exec` 上限 600 s，长命令期间心跳会判断连、该题直接算 harness 失败）。这是原项目最高优先级的判 0 风险。
