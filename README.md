@@ -1,6 +1,10 @@
-# PLE harness — v1 (runs the dev set)
+# PLE harness — v1（设计完成，dev set 尚未跑）
 
-Physical-Engineering's Last Exam 参赛 harness。第一版，可实际在 dev set 上跑。
+Physical-Engineering's Last Exam 参赛 harness。**spec-first + 交付物守卫**的第一版实现。
+
+> **当前状态（2026-11-23）**：代码已修复并通过离线自测与协议往返冒烟，但 **`kit check` 未跑、真模型端到端未验证、`artifacts/` 不存在、dev 分数为 0**。
+> 本文的「三项指标」是**对 baseline artifacts 的离线静态回归**，不是本 harness 跑过 29 题。
+> 剩余任务、阻塞项、运行手册与合规红线见 **[HANDOFF.md](HANDOFF.md)**；评估原件见 `docs/00-接手评估.md`，修复记录见 `docs/01-修复与验证记录.md`。
 
 设计原点：**MCP 作为中心**——serve.py 持有会话与决策循环，所有动作（exec / read_file /
 write_file / mcp_call）都经由 competition protocol 走 WebSocket 回到 evaluator；MCP server
@@ -46,7 +50,7 @@ GOAL.md                目标、里程碑、硬约束、非目标
 writeups/              5 篇技术叙事：为什么是这个形状、踩过的坑、还没证明的部分
 ```
 
-## 三项指标（都在 29 道真实 dev 题上量过）
+## 三项指标（对 baseline artifacts 的离线静态回归，非本 harness 实测）
 
 | 环节 | 结果 | 说明 |
 |---|---|---|
@@ -66,8 +70,14 @@ python3 dryrun.py
 # 2) 用真实题面 + 真实 workdir，仍然用 stub 模型
 python3 dryrun.py --artifact /path/to/artifacts/<task> --instruction inst.txt
 
-# 3) 真模型（本地起服务，自己当 evaluator）
-export MODEL_BASE_URL=https://api.example.com/v1 MODEL_API_KEY=sk-... MODEL_NAME=...
+# 3) 不需要模型 / Docker 的协议往返冒烟（task -> exec/write_file -> done）
+python3 devtools/protocol_smoke.py
+
+# 4) 可执行验收判据（缺 29 题数据时应报 BLOCKED，而不是 PASS）
+python3 criteria.py
+
+# 5) 真模型（本地起服务，自己当 evaluator）
+export MODEL_BASE_URL=https://api.example.com/v1 MODEL_API_KEY=... MODEL_NAME=...
 PORT=8080 python3 serve.py
 ```
 
@@ -100,6 +110,8 @@ uv run python -m kit artifacts /path/to/this/repo
 3. specgen 的 4 道 no-path 题：改为"首轮 exec 读全 task.md 后重解析"，并把 house 模板
    文件名规则写进对应 skill。
 4. 把 guard 的 `zip_soft` 从 WARN 提升为按题面措辞决定的硬判（现在一律 soft）。
+
+> 以上是按「提分」排序的原始设想；**提交前的真实优先级（合规清理 → kit check → 真模型 → dev set → 同一 commit 提交）以 [HANDOFF.md](HANDOFF.md) 为准**。WSL2 侧的一键流程在 `devtools/wsl-run.sh`。
 
 ## writeups
 
