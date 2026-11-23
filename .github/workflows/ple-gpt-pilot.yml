@@ -1,0 +1,223 @@
+name: PLE GPT cloud pilot
+
+on:
+  push:
+    branches: [codex/ple-gpt-cloud-pilot]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ple-gpt-cloud-pilot
+  cancel-in-progress: false
+
+jobs:
+  pilot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate the declared model with the official kit
+        shell: bash
+        run: |
+          docker version >/dev/null
+          python3 -m venv "$RUNNER_TEMP/ple-bootstrap"
+          "$RUNNER_TEMP/ple-bootstrap/bin/python" -m pip install --disable-pip-version-check uv
+          echo "$RUNNER_TEMP/ple-bootstrap/bin" >> "$GITHUB_PATH"
+          export PATH="$RUNNER_TEMP/ple-bootstrap/bin:$PATH"
+          kit="$RUNNER_TEMP/ple-official"
+          git init -q "$kit"
+          git -C "$kit" fetch --depth 1 https://github.com/google-research/ple.git 8320f0402fdca9f42476607f72bcfd5271cd50c9
+          git -C "$kit" checkout -q --detach FETCH_HEAD
+          cd "$kit"
+          uv sync
+          uv run python -m kit validate "$GITHUB_WORKSPACE"
+          uv run python - "$GITHUB_WORKSPACE/submission.yaml" <<'PY'
+          import sys
+          from pathlib import Path
+          import yaml
+
+          entry = yaml.safe_load(Path(sys.argv[1]).read_text())
+          if entry["model_api"] != "google-cloud/gpt-oss-120b":
+              raise SystemExit("This pilot requires the official gpt-oss-120b model ID.")
+          PY
+
+      - name: Prepare Hugging Face device authorization for this runner
+        id: hf_device
+        if: ${{ github.event.head_commit.message == 'Start authorized GPT cloud pilot' }}
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
+        run: |
+          if [[ -n "$HF_TOKEN" ]]; then exit 0; fi
+          umask 077
+          export HF_HOME="$RUNNER_TEMP/ple-hf-home"
+          printf 'HF_HOME=%s\n' "$HF_HOME" >> "$GITHUB_ENV"
+          state="$RUNNER_TEMP/ple-hf-auth"
+          nohup python3 devtools/hf_cloud_device.py \
+            --hf "$RUNNER_TEMP/ple-official/.venv/bin/hf" --state "$state" \
+            --public-key devtools/hf_cloud_session_public.pem \
+            </dev/null >"$RUNNER_TEMP/ple-hf-device.log" 2>&1 &
+          for _ in {1..25}; do
+            if [[ -s "$state/challenge.bin" || -f "$state/status" ]]; then break; fi
+            sleep 1
+          done
+          if [[ ! -s "$state/challenge.bin" ]]; then
+            echo 'Hugging Face CLI did not start device authorization.'
+            exit 1
+          fi
+          echo 'started=true' >> "$GITHUB_OUTPUT"
+
+      - name: Make the encrypted device challenge available
+        if: steps.hf_device.outputs.started == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ple-hf-device-challenge
+          path: ${{ runner.temp }}/ple-hf-auth/challenge.bin
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Wait for the selected Hugging Face account
+        if: steps.hf_device.outputs.started == 'true'
+        shell: bash
+        run: |
+          state="$RUNNER_TEMP/ple-hf-auth/status"
+          for _ in {1..64}; do
+            if [[ -s "$state" ]]; then break; fi
+            sleep 5
+          done
+          if [[ ! -s "$state" || "$(cat "$state")" != authenticated ]]; then
+            echo 'Hugging Face device authorization did not complete.'
+            exit 1
+          fi
+
+      - name: Verify GPT tool calls and score one checks-only task when authorized
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        run: |
+          umask 077
+          export MODEL_PROXY_URL=http://127.0.0.1:4101
+          MODEL_PROXY_KEY=$(openssl rand -hex 24)
+          export MODEL_PROXY_KEY
+          env -u HF_TOKEN python3 devtools/gpt_cloud_relay.py >"$RUNNER_TEMP/ple-relay.log" 2>&1 &
+          relay_pid=$!
+          trap 'kill "$relay_pid" 2>/dev/null || true' EXIT
+          curl --max-time 5 --fail --silent --retry 8 --retry-connrefused --retry-delay 1 "$MODEL_PROXY_URL/ready" >/dev/null
+
+          env -u HF_TOKEN python3 - <<'PY'
+          import json
+          import os
+          import time
+          from urllib.error import HTTPError, URLError
+          from urllib.request import Request, urlopen
+
+          payload = {
+              "model": "gpt-oss-120b",
+              "messages": [{"role": "user", "content": "Call hello with the name Ada."}],
+              "max_tokens": 256,
+              "reasoning_effort": "low",
+              "tools": [{"type": "function", "function": {
+                  "name": "hello", "description": "Greet a person",
+                  "parameters": {"type": "object", "properties": {
+                      "name": {"type": "string"}}, "required": ["name"]},
+              }}],
+              "tool_choice": "auto",
+          }
+          request = Request(os.environ["MODEL_PROXY_URL"] + "/v1/chat/completions",
+                            json.dumps(payload).encode(),
+                            {"Content-Type": "application/json", "Authorization": "Bearer " + os.environ["MODEL_PROXY_KEY"]})
+          for attempt in range(3):
+              try:
+                  with urlopen(request, timeout=160) as response:
+                      output = json.load(response)
+                  break
+              except HTTPError as exc:
+                  if attempt == 2 or exc.code not in (429, 500, 502, 503, 504):
+                      raise SystemExit(f"GPT tool-call probe failed with HTTP {exc.code}.") from None
+                  time.sleep(31)
+              except (URLError, TimeoutError):
+                  if attempt == 2:
+                      raise SystemExit("GPT tool-call probe timed out.") from None
+                  time.sleep(31)
+          try:
+              calls = output["choices"][0]["message"]["tool_calls"]
+              valid = output["model"] == "gpt-oss-120b" and any(
+                  call["function"]["name"] == "hello" and
+                  json.loads(call["function"]["arguments"]) == {"name": "Ada"} for call in calls)
+          except (KeyError, TypeError, ValueError, IndexError):
+              valid = False
+          if not valid:
+              raise SystemExit("GPT tool-call probe did not return the expected synthetic tool call.")
+          print("gpt-oss-120b synthetic tool-call probe passed.")
+          PY
+
+          if [[ -z "$HF_TOKEN" && ( -z "${HF_HOME:-}" || ! -s "$HF_HOME/token" ) ]]; then
+            echo 'Official dev task not run. Awaiting Hugging Face dataset access.' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          cd "$RUNNER_TEMP/ple-official"
+          uv run python - <<'PY'
+          from huggingface_hub import HfApi
+          from huggingface_hub.errors import HfHubHTTPError
+
+          try:
+              HfApi().auth_check("google/physical-engineerings-last-exam", repo_type="dataset")
+          except HfHubHTTPError as exc:
+              status = getattr(exc.response, "status_code", None)
+              raise SystemExit(f"Hugging Face dataset permission check failed (HTTP {status}).") from None
+          except Exception:
+              raise SystemExit("Hugging Face dataset permission check could not complete.") from None
+          print("Hugging Face dataset access verified.")
+          PY
+
+          export UV_TOOL_BIN_DIR="$RUNNER_TEMP/ple-bin"
+          mkdir -p "$UV_TOOL_BIN_DIR"
+          export PATH="$UV_TOOL_BIN_DIR:$PATH"
+          env -u HF_TOKEN uv tool install harbor==0.20.0 --with websockets
+          out="$RUNNER_TEMP/ple-pilot"
+          log="$RUNNER_TEMP/ple-pilot.log"
+          status=0
+          uv run python eval/run.py "$GITHUB_WORKSPACE" --tasks wind-diaphragm-shear \
+            --trials 1 --attempts 1 --no-export --out "$out" >"$log" 2>&1 || status=$?
+
+          python3 - "$out/results.json" "$log" "$status" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json
+          import math
+          import sys
+          from pathlib import Path
+
+          result_path, log_path, exit_status = sys.argv[1:]
+          if not Path(result_path).is_file():
+              log = Path(log_path).read_text(errors="replace").lower()
+              if "no space left" in log:
+                  issue = "runner disk exhausted"
+              elif "docker failed" in log or "docker daemon" in log:
+                  issue = "Docker setup failed"
+              elif "401 client error" in log or "403 client error" in log or "gated repo" in log:
+                  issue = "dataset download was refused"
+              else:
+                  issue = "official evaluator stopped before writing results"
+              print(f"wind-diaphragm-shear: unmeasured ({issue}; exit {exit_status}).")
+              raise SystemExit(1)
+          result = json.loads(Path(result_path).read_text())
+          if result.get("model") != "google-cloud/gpt-oss-120b":
+              raise SystemExit("Evaluation report has an unexpected model ID.")
+          task = next((row for row in result["tasks"] if row["id"] == "wind-diaphragm-shear"), None)
+          if not task or not task.get("measured"):
+              print("wind-diaphragm-shear: official evaluator did not measure a score.")
+              raise SystemExit(1)
+          score = float(task["score"])
+          if not math.isfinite(score) or not 0 <= score <= 1:
+              raise SystemExit("Evaluation report has an invalid score.")
+          print(f"wind-diaphragm-shear: measured, normalized score {score:.6f} / 1.000000.")
+          if exit_status != "0":
+              print(f"Official evaluator exited {exit_status} after recording the score.")
+              raise SystemExit(1)
+          PY
