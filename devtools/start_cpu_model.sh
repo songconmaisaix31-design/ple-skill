@@ -52,8 +52,10 @@ fi
 download() {
   env -u HF_TOKEN -u HUGGING_FACE_HUB_TOKEN -u HF_OIDC_RESOURCE -u HF_OIDC_ID_TOKEN \
     -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u MODEL_PROXY_KEY \
-    curl --fail --silent --show-error --location --retry 2 --connect-timeout 20 \
-      --max-time 900 --proto '=https' --proto-redir '=https' "$1" -o "$2"
+    curl --fail --silent --show-error --location --http1.1 \
+      --retry 20 --retry-delay 5 --retry-all-errors --continue-at - \
+      --connect-timeout 20 --max-time 2700 \
+      --proto '=https' --proto-redir '=https' "$1" -o "$2"
 }
 
 verify() {

@@ -5,16 +5,22 @@ import argparse
 import asyncio
 import base64
 from collections import deque
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, ExitStack
+import hashlib
+import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
 import time
+import tokenize
 import uuid
 from unittest.mock import patch
+from urllib.parse import urlsplit
+from zipfile import ZipFile
 
 
 IMAGE = "python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b"
@@ -246,22 +252,131 @@ def first_code_action(lines):
     return None
 
 
+ARCHIVE_VARIANTS = ("d", "e", "f", "g", "h", "i")
+CONTROLLED_VARIANTS = ("h", "i")
+CONTROLLED_RELEASE_SEC = 250
+CONTROLLED_ARCHIVE_SHA256 = "511905b2bc72f17b92abf364eade2e2cfd2b060b86419796197f37968b5204e7"
+CONTROLLED_SOURCE_SHA256 = "eba7247453712a78c991e152dd1e4bf08d80474429601e25ec7ae6fd6fbb7381"
+CONTROLLED_PROGRAM_SHA256 = "f4ece9d6d7e41e93f364db640b51b50c12c947ce1639fd2af991007dd76364f2"
+PYTHON_FENCE = re.compile(r"```python\n(.*?)\n```", re.DOTALL)
+
+
+def controlled_program():
+    """Recover the frozen real model program and remove only COMMENT tokens."""
+    evidence = Path(__file__).resolve().parents[1] / "docs/experiments/paired-storage-v1/evidence.zip"
+    data = evidence.read_bytes()
+    if hashlib.sha256(data).hexdigest() != CONTROLLED_ARCHIVE_SHA256:
+        raise ValueError("controlled replay source archive changed")
+    with ZipFile(io.BytesIO(data)) as archive:
+        events = [json.loads(line) for line in archive.read("d/1/text/model-io.jsonl").splitlines()]
+    replies = [row for row in events if row.get("event") == "response" and row.get("call") == 1]
+    if len(replies) != 1:
+        raise ValueError("controlled replay source response missing")
+    text = replies[0]["choices"][0]["message"]["content"].strip()
+    matched = PYTHON_FENCE.fullmatch(text)
+    if not matched:
+        raise ValueError("controlled replay source is not a Python fence")
+    source = matched[1]
+    if hashlib.sha256(source.encode()).hexdigest() != CONTROLLED_SOURCE_SHA256:
+        raise ValueError("controlled replay source program changed")
+    lines = source.splitlines()
+    for token in tokenize.generate_tokens(io.StringIO(source).readline):
+        if token.type == tokenize.COMMENT:
+            line, column = token.start
+            lines[line - 1] = lines[line - 1][:column].rstrip()
+    program = "\n".join(lines)
+    if hashlib.sha256(program.encode()).hexdigest() != CONTROLLED_PROGRAM_SHA256:
+        raise ValueError("controlled replay normalized program changed")
+    return program
+
+
+class ModelIOArchive:
+    """Host-side transcript for explicitly opted-in, original CPU fixtures."""
+
+    def __init__(self, path, limit=2 * 1024 * 1024):
+        self.path = path
+        self.limit = limit
+        self.bytes_written = 0
+        self.requests = 0
+        self.omitted = 0
+        path.open("xb").close()
+
+    def write(self, record):
+        encoded = (json.dumps(record, ensure_ascii=True, separators=(",", ":")) + "\n").encode("utf-8")
+        if self.bytes_written + len(encoded) > self.limit - 256:
+            self.omitted += 1
+            return
+        with self.path.open("ab") as stream:
+            stream.write(encoded)
+        self.bytes_written += len(encoded)
+
+    def request(self, body, start_sec=None):
+        self.requests += 1
+        allowed = ("model", "messages", "tools", "tool_choice", "max_tokens", "reasoning_effort",
+                   "temperature", "seed", "top_p", "stop")
+        fields = {key: body[key] for key in allowed if key in body}
+        if set(body) - set(allowed) or not isinstance(fields.get("messages"), list):
+            self.omitted += 1
+        record = {"event": "request", "call": self.requests, "body": fields}
+        if type(start_sec) in (int, float):
+            record["start_sec"] = round(start_sec, 3)
+        self.write(record)
+        return self.requests
+
+    def response(self, call_id, payload):
+        # Include exact visible assistant text and native function arguments, which
+        # contain the generated Python. Credentials, hidden model state and HTTP
+        # headers are not part of the generation transcript.
+        choices = []
+        for choice in payload.get("choices") or []:
+            message = choice.get("message") or {}
+            visible = {k: message[k] for k in ("role", "content", "tool_calls") if k in message}
+            choices.append({"finish_reason": choice.get("finish_reason"), "message": visible})
+        if not choices:
+            self.omitted += 1
+        self.write({"event": "response", "call": call_id, "choices": choices})
+
+    def scripted_response(self, call_id, source, end_sec):
+        self.write({"event": "response", "call": call_id, "scripted": True,
+                    "end_sec": round(end_sec, 3), "choices": [{
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": f"```python\n{source}\n```"},
+                    }]})
+
+    def finish(self):
+        summary = {"complete": self.requests > 0 and self.omitted == 0,
+                   "requests": self.requests, "omitted_records_or_fields": self.omitted}
+        with self.path.open("ab") as stream:
+            stream.write((json.dumps({"event": "end", **summary}) + "\n").encode("ascii"))
+        return summary
+
+
 @contextmanager
-def record_model_requests(attempts, first_events, elapsed):
+def record_model_requests(attempts, first_events, elapsed, archive=None):
     import httpx
     post = httpx.AsyncClient.post
 
     async def observed(client, *args, **kwargs):
         before = time.monotonic()
         row = {"status": "error"}
+        call_id = None
+        if archive is not None:
+            endpoint = urlsplit(str(args[0] if args else kwargs.get("url", "")))
+            if endpoint.hostname in ("127.0.0.1", "localhost", "::1") and endpoint.path == "/v1/chat/completions":
+                call_id = archive.request(kwargs.get("json") or {}, elapsed())
         try:
             response = await post(client, *args, **kwargs)
             row.update(status="complete", http_status=response.status_code)
             if response.is_success:
                 try:
-                    row.update(describe_model_response(response.json()))
+                    payload = response.json()
+                    if call_id is not None:
+                        archive.response(call_id, payload)
+                    row.update(describe_model_response(payload))
                 except (ValueError, TypeError, AttributeError, LookupError, RecursionError):
                     row["response_shape"] = "unrecognized"
+                    if call_id is not None:
+                        archive.omitted += 1
             return response
         except asyncio.CancelledError:
             row["status"] = "interrupted"
@@ -269,6 +384,9 @@ def record_model_requests(attempts, first_events, elapsed):
         finally:
             row["end_sec"] = round(elapsed(), 2)
             row["duration_sec"] = round(time.monotonic() - before, 2)
+            if call_id is not None:
+                archive.write({"event": "status", "call": call_id, "status": row["status"],
+                               "http_status": row.get("http_status"), "end_sec": row["end_sec"]})
             first_events.setdefault("first_model_attempt", row)
             if row.get("tools") or row.get("text_chars"):
                 first_events.setdefault("first_model_output", row)
@@ -292,6 +410,53 @@ class TransportProbe:
                 lines.append(f"(target / {name!r}).write_bytes({data!r})")
             call = {"id": "probe", "name": "run_python", "arguments": {"code": "\n".join(lines)}}
         return {"content": "", "tool_calls": [call], "usage": {}}
+
+
+class ControlledFirstModel:
+    """Release one checksum-pinned failed program, then delegate to the live model."""
+
+    def __init__(self, live, source, elapsed, archive, attempts, first_events):
+        self.live = live
+        self.source = source
+        self.elapsed = elapsed
+        self.archive = archive
+        self.attempts = attempts
+        self.first_events = first_events
+        self.model = live.model
+        self.mode = live.mode
+        self.used = False
+
+    async def chat(self, messages, system, tools=None, **kwargs):
+        if self.used:
+            return await self.live.chat(messages, system, tools=tools, **kwargs)
+        self.used = True
+        start = self.elapsed()
+        body = {
+            "model": self.model,
+            "messages": [{"role": "system", "content": system}, *messages],
+            "tools": tools or [],
+            "tool_choice": kwargs.get("tool_choice", "auto"),
+            "max_tokens": kwargs.get("max_tokens", 1600),
+            "temperature": 0,
+            "seed": 17,
+        }
+        call_id = self.archive.request(body, start)
+        await asyncio.sleep(max(0, CONTROLLED_RELEASE_SEC - self.elapsed()))
+        end = self.elapsed()
+        self.archive.scripted_response(call_id, self.source, end)
+        self.archive.write({"event": "status", "call": call_id, "status": "complete",
+                            "http_status": 200, "end_sec": round(end, 3)})
+        row = {"status": "complete", "http_status": 200, "finish_reason": "stop",
+               "text_chars": len(self.source) + 14, "tool_count": 0, "python_fence": True,
+               "tools": [], "output_tokens": 0, "start_sec": round(start, 3),
+               "end_sec": round(end, 3), "duration_sec": round(end - start, 3),
+               "scripted": True}
+        self.first_events.setdefault("first_model_attempt", row)
+        self.first_events.setdefault("first_model_output", row)
+        self.attempts.append(row)
+        return {"content": f"```python\n{self.source}\n```", "tool_calls": [],
+                "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0},
+                "finish_reason": "stop"}
 
 
 @asynccontextmanager
@@ -318,7 +483,8 @@ async def task_container(inputs, fixture_paths):
         await asyncio.to_thread(docker, "rm", "-f", name, read=True)
 
 
-async def measure(workspace, variant, seconds, kit_root, check_transport=False, checkpoint_sec=None):
+async def measure(workspace, variant, seconds, kit_root, check_transport=False, checkpoint_sec=None,
+                  archive_path=None, controlled_first=False):
     sys.path.insert(0, str(kit_root))
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import websockets
@@ -326,6 +492,12 @@ async def measure(workspace, variant, seconds, kit_root, check_transport=False, 
     from serve import solve
     from design_regression import grade, prepare
 
+    archive = None
+    if archive_path is not None:
+        if (check_transport or variant not in ARCHIVE_VARIANTS
+                or archive_path.resolve().is_relative_to(workspace.resolve())):
+            raise ValueError("model IO must be archived outside a synthetic D/E/F/G task workspace")
+        archive = ModelIOArchive(archive_path)
     if check_transport:
         workspace.mkdir()
         (workspace / "task.md").write_text("Save output/schedule.csv and output/summary.json under output/.")
@@ -352,9 +524,18 @@ async def measure(workspace, variant, seconds, kit_root, check_transport=False, 
     async with task_container(workspace, fixture_paths) as name:
         relay = RecordingRelay(DockerExecutor(name, user="65534:65534"), workdir=WORKDIR,
                                agent_timeout_sec=seconds)
-        model_override = (patch("serve.from_env", return_value=TransportProbe()) if check_transport
-                          else record_model_requests(model_attempts, first_events, lambda: time.monotonic() - started))
-        with model_override:
+        with ExitStack() as stack:
+            if check_transport:
+                stack.enter_context(patch("serve.from_env", return_value=TransportProbe()))
+            else:
+                stack.enter_context(record_model_requests(
+                    model_attempts, first_events, lambda: time.monotonic() - started, archive))
+                if controlled_first:
+                    from skillkit.model import from_env as configured_model
+                    wrapper = ControlledFirstModel(
+                        configured_model(), controlled_program(),
+                        lambda: time.monotonic() - started, archive, model_attempts, first_events)
+                    stack.enter_context(patch("serve.from_env", return_value=wrapper))
             async with websockets.serve(solve, "127.0.0.1", 0, max_size=16 * 1024 * 1024,
                                         ping_interval=None) as server:
                 address = server.sockets[0].getsockname()
@@ -415,6 +596,8 @@ async def measure(workspace, variant, seconds, kit_root, check_transport=False, 
               "last_actions": list(actions), "final_message_chars": len(outcome.final_message),
               "done_after_cancel": outcome.done_after_cancel}
     report.update(first_events=first_events, last_model_attempts=list(model_attempts))
+    if archive is not None:
+        report["model_io_archive"] = archive.finish()
     if checkpoint is not None:
         report["checkpoint"] = checkpoint
     first_action = first_code_action(outcome.log)
@@ -438,11 +621,26 @@ def main():
     parser.add_argument("--checkpoint-only-sec", type=int,
                         help="Capture and grade at this external cutoff, then stop the session")
     parser.add_argument("--keep-dir", type=Path, help="New directory for the original inputs and two outputs")
+    parser.add_argument("--archive-model-io", type=Path, metavar="JSONL",
+                        help="Save model prompts and generated code for allowlisted local CPU trials")
+    parser.add_argument("--controlled-first-program", action="store_true",
+                        help="Use the frozen failed first program for the preregistered H/I diagnostic")
     args = parser.parse_args()
     if not 1 <= args.timeout_sec <= 21600:
         parser.error("time budget must be between 1 and 21600 seconds")
+    if args.archive_model_io is not None:
+        endpoint = urlsplit(os.environ.get("MODEL_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or "")
+        if (args.check_transport or args.variant not in ARCHIVE_VARIANTS or os.environ.get("MODEL_NAME") != "gemma-4-26b"
+                or endpoint.hostname not in ("127.0.0.1", "localhost", "::1")):
+            parser.error("--archive-model-io is available only for allowlisted trials on the local Gemma CPU endpoint")
+        if args.archive_model_io.exists() or not args.archive_model_io.parent.is_dir():
+            parser.error("--archive-model-io needs a new file in an existing host directory")
     if args.checkpoint_only_sec is not None and (args.check_transport or not 0 < args.checkpoint_only_sec < args.timeout_sec):
         parser.error("--checkpoint-only-sec needs a full model run and must be shorter than --timeout-sec")
+    if args.controlled_first_program != (args.variant in CONTROLLED_VARIANTS):
+        parser.error("--controlled-first-program is required exactly for H/I")
+    if args.controlled_first_program and (args.archive_model_io is None or args.checkpoint_only_sec != 395):
+        parser.error("H/I controlled replay requires model IO archival and the frozen 395-second cutoff")
     kit = args.kit_root.resolve()
     if not (kit / "kit" / "relay.py").is_file():
         parser.error("the kit checkout must contain kit/relay.py")
@@ -455,11 +653,14 @@ def main():
         if workspace.exists():
             parser.error("--keep-dir must not exist")
         return asyncio.run(measure(workspace, args.variant, args.timeout_sec, kit,
-                                   args.check_transport, args.checkpoint_only_sec))
+                                   args.check_transport, args.checkpoint_only_sec, args.archive_model_io,
+                                   args.controlled_first_program))
     with tempfile.TemporaryDirectory(prefix="ple-design-") as temporary:
         return asyncio.run(measure(Path(temporary) / "task", args.variant, args.timeout_sec, kit,
-                                   args.check_transport, args.checkpoint_only_sec))
+                                   args.check_transport, args.checkpoint_only_sec, args.archive_model_io,
+                                   args.controlled_first_program))
 
 
 if __name__ == "__main__":
     sys.exit(main())
+

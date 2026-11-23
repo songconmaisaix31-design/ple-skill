@@ -117,3 +117,4 @@ if __name__ == "__main__":
     parser.add_argument("--prior-evidence", required=True, type=Path)
     args = parser.parse_args()
     check(json.loads(args.protocol.read_bytes()), args.prior_evidence)
+

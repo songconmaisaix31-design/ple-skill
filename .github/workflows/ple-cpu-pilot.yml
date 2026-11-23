@@ -21,9 +21,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: ${{ fromJSON(github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' && '["a","b"]' || '["a"]') }}
+        variant: ${{ fromJSON(github.event.head_commit.message == 'Run controlled repair replay on H and I' && '["h","i"]' || github.event.head_commit.message == 'Test source context in a fixed-seed repair ablation' && '["f","g"]' || github.event.head_commit.message == 'Replicate the first Python action with a fixed seed' && '["d","e"]' || startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') && '["a","b","c"]' || github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' && '["a","b"]' || '["a"]') }}
+        strategy: ${{ fromJSON((github.event.head_commit.message == 'Run controlled repair replay on H and I' || github.event.head_commit.message == 'Replicate the first Python action with a fixed seed' || github.event.head_commit.message == 'Test source context in a fixed-seed repair ablation') && '["paired"]' || startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') && '["legacy","native","text"]' || '["legacy"]') }}
+        repeat: ${{ fromJSON((github.event.head_commit.message == 'Run controlled repair replay on H and I' || github.event.head_commit.message == 'Replicate the first Python action with a fixed seed' || github.event.head_commit.message == 'Test source context in a fixed-seed repair ablation') && '[1,2,3]' || '[1]') }}
     env:
-      DESIGN_BENCH: ${{ github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' }}
+      DESIGN_BENCH: ${{ github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' || startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') }}
       VERIFY_MCP: ${{ startsWith(github.event.head_commit.message, 'Check PLE tool transport on the cloud CPU') }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -46,11 +48,29 @@ jobs:
           cd "$kit"
           uv sync
 
+      - name: Verify isolated execution and exact file exports
+        if: env.DESIGN_BENCH == 'true' || matrix.strategy == 'paired'
+        shell: bash
+        run: |
+          docker pull --platform linux/amd64 'python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b'
+          "$RUNNER_TEMP/ple-official/.venv/bin/python" devtools/run_design_regression.py \
+            --kit-root "$RUNNER_TEMP/ple-official" --check-transport | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify the controlled repair fixture and wrapper
+        if: ${{ matrix.strategy == 'paired' && (matrix.variant == 'h' || matrix.variant == 'i') }}
+        shell: bash
+        run: |
+          PYTHONPATH=devtools "$RUNNER_TEMP/ple-official/.venv/bin/python" devtools/verify_repair_fixture.py \
+            --protocol docs/experiments/controlled-repair-replay-v1/protocol.json \
+            --prior-evidence docs/experiments/paired-storage-v1/evidence.zip
+          "$RUNNER_TEMP/ple-official/.venv/bin/python" devtools/test_controlled_replay.py
+
       - name: Start the account-free CPU model and verify a real synthetic tool call
+        if: matrix.strategy != 'paired'
         shell: bash
         env:
           PLE_CPU_EVAL_GREEDY: ${{ env.DESIGN_BENCH }}
-          PROFILE: ${{ inputs.model || (github.event.head_commit.message == 'Test Granite on the cloud CPU' && 'granite') || 'auto' }}
+          PROFILE: ${{ (startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') && 'gemma26') || inputs.model || (github.event.head_commit.message == 'Test Granite on the cloud CPU' && 'granite') || 'auto' }}
         run: |
           umask 077
           export MODEL_PROXY_URL=http://127.0.0.1:4102
@@ -90,7 +110,7 @@ jobs:
           exit 1
 
       - name: Score the independent classroom mechanics diagnostic
-        if: env.VERIFY_MCP != 'true' && env.DESIGN_BENCH != 'true'
+        if: env.VERIFY_MCP != 'true' && env.DESIGN_BENCH != 'true' && matrix.strategy != 'paired'
         continue-on-error: true
         shell: bash
         run: |
@@ -105,14 +125,133 @@ jobs:
         shell: bash
         env:
           VARIANT: ${{ matrix.variant }}
+          PLE_CODE_ACTION: ${{ matrix.strategy }}
+          CHECKPOINT_ONLY: ${{ github.event.head_commit.message == 'Compare Python action strategies on cloud CPU at 395 seconds' }}
         run: |
-          docker pull --platform linux/amd64 'python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b'
+          timing=()
+          if [[ "$CHECKPOINT_ONLY" == true ]]; then timing=(--checkpoint-only-sec 395); fi
           MODEL_API="$PLE_CPU_MODEL_API" MODEL_NAME="$PLE_CPU_MODEL_NAME" \
             "$RUNNER_TEMP/ple-official/.venv/bin/python" devtools/run_design_regression.py \
-            --kit-root "$RUNNER_TEMP/ple-official" --variant "$VARIANT" --timeout-sec 720 | tee -a "$GITHUB_STEP_SUMMARY"
+            --kit-root "$RUNNER_TEMP/ple-official" --variant "$VARIANT" --timeout-sec 720 "${timing[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Replicate both action modes on the same CPU
+        if: matrix.strategy == 'paired'
+        shell: bash
+        env:
+          VARIANT: ${{ matrix.variant }}
+          REPEAT: ${{ matrix.repeat }}
+          PLE_CPU_EVAL_GREEDY: 'true'
+        run: |
+          umask 077
+          export MODEL_PROXY_URL=http://127.0.0.1:4102
+          export MODEL_BASE_URL="$MODEL_PROXY_URL/v1"
+          export PLE_CPU_STATE="$RUNNER_TEMP/ple-cpu"
+          MODEL_PROXY_KEY=$(openssl rand -hex 24)
+          export MODEL_PROXY_KEY
+          export MODEL_API_KEY="$MODEL_PROXY_KEY"
+          printf '::add-mask::%s\n' "$MODEL_PROXY_KEY"
+          kit="$RUNNER_TEMP/ple-official"
+          python="$kit/.venv/bin/python"
+          private="$RUNNER_TEMP/ple-replication-private"
+          public="$RUNNER_TEMP/ple-replication"
+          mkdir -p "$private" "$public"
+          case "$VARIANT:$REPEAT" in
+            d:1|e:2|d:3) arms=(legacy text) ;;
+            e:1|d:2|e:3) arms=(text legacy) ;;
+            f:1|g:2|f:3) arms=(text text-source) ;;
+            g:1|f:2|g:3) arms=(text-source text) ;;
+            h:1|i:2|h:3) arms=(text text-source) ;;
+            i:1|h:2|i:3) arms=(text-source text) ;;
+            *) echo 'Unexpected replication pair.' >&2; exit 1 ;;
+          esac
+
+          stop_server() {
+            local pid state
+            [[ -s "$PLE_CPU_STATE/server.pid" ]] || return 0
+            read -r pid < "$PLE_CPU_STATE/server.pid"
+            [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 ]] || return 1
+            kill "$pid" 2>/dev/null || true
+            for _ in {1..15}; do
+              state=$(ps -o stat= -p "$pid" || true)
+              if [[ -z "$state" || "$state" == Z* ]]; then
+                rm -f "$PLE_CPU_STATE/server.pid"
+                return 0
+              fi
+              sleep 1
+            done
+            return 1
+          }
+
+          overall=0
+          position=0
+          controlled=()
+          if [[ "$VARIANT" == h || "$VARIANT" == i ]]; then
+            controlled=(--controlled-first-program)
+          fi
+          for arm in "${arms[@]}"; do
+            position=$((position + 1))
+            action_mode="$arm"
+            unset PLE_REPAIR_CONTEXT
+            if [[ "$arm" == text-source ]]; then
+              action_mode=text
+              export PLE_REPAIR_CONTEXT=source
+            fi
+            raw="$private/$arm"
+            evidence="$public/$arm"
+            mkdir -p "$raw" "$evidence"
+            phase=server_restart
+            status=1
+            if stop_server; then
+              rm -f "$PLE_CPU_STATE/server.log"
+              phase=model_start
+              if bash devtools/start_cpu_model.sh gemma26 > "$raw/startup.log" 2>&1; then
+                source "$PLE_CPU_STATE/model.env"
+                if [[ "$PLE_CPU_MODEL_NAME" == gemma-4-26b && "$PLE_CPU_MODEL_API" == google-cloud/gemma-4-26b ]]; then
+                  export MODEL_API="$PLE_CPU_MODEL_API" MODEL_NAME="$PLE_CPU_MODEL_NAME"
+                  phase=model_probe
+                  if "$python" -m devtools.cloud_model_probe > "$raw/probe.log" 2>&1; then
+                    phase=experiment
+                    status=0
+                    PLE_CODE_ACTION="$action_mode" "$python" devtools/run_design_regression.py \
+                      --kit-root "$kit" --variant "$VARIANT" --timeout-sec 720 --checkpoint-only-sec 395 \
+                      "${controlled[@]}" \
+                      --keep-dir "$raw/case" --archive-model-io "$raw/model-io.jsonl" \
+                      > "$raw/experiment.log" 2>&1 || status=$?
+                  fi
+                fi
+              fi
+              if ! stop_server; then
+                echo 'The previous model process did not exit.' >&2
+                overall=1
+              fi
+              if [[ -f "$PLE_CPU_STATE/server.log" ]]; then cp "$PLE_CPU_STATE/server.log" "$raw/server.log"; fi
+            fi
+            "$python" devtools/record_paired_arm.py "$raw" "$evidence" "$arm" "$position" "${arms[0]}" "$phase" "$status" || overall=1
+          done
+          exit "$overall"
+
+      - name: Upload the paired replication evidence
+        if: ${{ always() && matrix.strategy == 'paired' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ple-replication-${{ matrix.variant }}-${{ matrix.repeat }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/ple-replication/*/metadata.json
+            ${{ runner.temp }}/ple-replication/*/report.json
+            ${{ runner.temp }}/ple-replication/*/startup.log
+            ${{ runner.temp }}/ple-replication/*/probe.log
+            ${{ runner.temp }}/ple-replication/*/server.log
+            ${{ runner.temp }}/ple-replication/*/experiment.log
+            ${{ runner.temp }}/ple-replication/*/model-io.jsonl
+            ${{ runner.temp }}/ple-replication/*/case/task.md
+            ${{ runner.temp }}/ple-replication/*/case/input/site.json
+            ${{ runner.temp }}/ple-replication/*/case/input/periods.csv
+            ${{ runner.temp }}/ple-replication/*/case/output/schedule.csv
+            ${{ runner.temp }}/ple-replication/*/case/output/summary.json
+          if-no-files-found: warn
 
       - name: Run the official kit synthetic tasks using the real CPU model
-        if: env.DESIGN_BENCH != 'true'
+        if: env.DESIGN_BENCH != 'true' && matrix.strategy != 'paired'
         shell: bash
         run: |
           entry="$RUNNER_TEMP/ple-cpu-entry"
@@ -160,3 +299,4 @@ jobs:
         run: |
           pid="$RUNNER_TEMP/ple-cpu/server.pid"
           if [[ -s "$pid" ]]; then kill "$(cat "$pid")" 2>/dev/null || true; fi
+

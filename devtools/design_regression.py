@@ -78,6 +78,20 @@ VARIANTS = {
             (4, 6, 8, 7), (5, 3, 5, 5), (6, 3, 2, 0),
         )),
     ),
+    "h": (
+        Site(8, 2, 14, 6, 6, (0, 2, 4, 7)),
+        tuple(Period(*row) for row in (
+            (1, 4, 4, 7), (2, 3, 7, 3), (3, 5, 4, 10),
+            (4, 2, 2, 1), (5, 5, 7, 8), (6, 1, 4, 6),
+        )),
+    ),
+    "i": (
+        Site(3, 0, 9, 3, 5, (0, 1, 3, 6)),
+        tuple(Period(*row) for row in (
+            (1, 1, 3, 8), (2, 4, 6, 2), (3, 5, 6, 7),
+            (4, 1, 0, 12), (5, 4, 6, 4), (6, 1, 3, 1),
+        )),
+    ),
 }
 SCHEDULE_COLUMNS = ("period", "pump_units", "end_storage_units", "period_cost_cents")
 RESULT_FILENAMES = {"schedule.csv", "summary.json"}
@@ -252,3 +266,4 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

@@ -102,6 +102,46 @@ jobs:
           replay_experiment paired-storage-v1 52dc6b2f683dc5295529843530fe2ee4ea6e1c71
           replay_experiment repair-source-v1 9c1a00a40c8e40212ea1e97c93824366889ddb8e
 
+          controlled=docs/experiments/controlled-repair-replay-v1
+          controlled_replay="$RUNNER_TEMP/controlled-repair-replay-v1"
+          mkdir -p "$controlled_replay"
+          python3 devtools/build_controlled_repair_evidence.py \
+            --protocol "$controlled/protocol.json" \
+            --job h:1:"$controlled/attempts/run-45247679226-h1-attempt2.zip" \
+            --job h:2:"$controlled/attempts/run-45247679226-h2.zip" \
+            --job h:3:"$controlled/attempts/run-45247679226-h3.zip" \
+            --job i:1:"$controlled/attempts/run-45247679226-i1.zip" \
+            --job i:2:"$controlled/attempts/run-45247679226-i2.zip" \
+            --job i:3:"$controlled/attempts/run-45246424026-i3.zip" \
+            --output "$controlled_replay/evidence.zip" \
+            --corrections "$controlled_replay/corrections.json"
+          cmp "$controlled/evidence.zip" "$controlled_replay/evidence.zip"
+          python3 devtools/verify_controlled_repair_evidence.py \
+            --archive "$controlled_replay/evidence.zip" \
+            --protocol "$controlled/protocol.json" \
+            --settings-protocol docs/experiments/repair-source-v1/protocol.json \
+            --expected-sha 55a02ad1bbd3f2afd6d29869e8797a9b879c51e0 \
+            --expected-sha de4be67625116a599f8c5d39d3eb10ed117db03c \
+            --csv "$controlled_replay/trials.csv" \
+            --details "$controlled_replay/code-coverage.json"
+          python3 devtools/controlled_repair_report.py "$controlled_replay/trials.csv" \
+            --output "$controlled_replay/summary.json"
+          python3 - "$controlled" "$controlled_replay" <<'PYCONTROLLED'
+          import csv
+          import json
+          import sys
+          from pathlib import Path
+
+          saved, replay = map(Path, sys.argv[1:])
+          with (saved / "trials.csv").open(newline="") as a, (replay / "trials.csv").open(newline="") as b:
+              archived, rebuilt = csv.DictReader(a), csv.DictReader(b)
+              if archived.fieldnames != rebuilt.fieldnames or list(archived) != list(rebuilt):
+                  raise SystemExit("controlled-repair-replay-v1/trials.csv differs from replay")
+          for name in ("summary.json", "code-coverage.json", "corrections.json"):
+              if json.loads((saved / name).read_bytes()) != json.loads((replay / name).read_bytes()):
+                  raise SystemExit(f"controlled-repair-replay-v1/{name} differs from replay")
+          PYCONTROLLED
+
       - name: Exchange the authorized runner identity for a temporary Hugging Face token
         if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' }}
         shell: bash

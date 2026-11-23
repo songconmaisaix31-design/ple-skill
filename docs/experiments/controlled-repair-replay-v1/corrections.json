@@ -1,0 +1,139 @@
+{
+  "protocol_sha256": "0f727929b038b50623dc93e20f2294ff17fd98e3ff25076508423bd922549003",
+  "sources": [
+    {
+      "case": "h",
+      "repeat": 1,
+      "file": "run-45247679226-h1-attempt2.zip",
+      "sha256": "c1e34bfdba27fe1220bde9f05515c86bfab8ebf1cf3a19eaa839c34a990c5a06"
+    },
+    {
+      "case": "h",
+      "repeat": 2,
+      "file": "run-45247679226-h2.zip",
+      "sha256": "21c247f81aa21ee11b23ffa5339415e88cf42879e8d3552b110a77a3631fc008"
+    },
+    {
+      "case": "h",
+      "repeat": 3,
+      "file": "run-45247679226-h3.zip",
+      "sha256": "3acb70b10376ee60f3e49ba5d403a91a2974ee028271219e877376b03503c9be"
+    },
+    {
+      "case": "i",
+      "repeat": 1,
+      "file": "run-45247679226-i1.zip",
+      "sha256": "5521382ff48f273b2e7560b5cbd06b8b0677b9d29466482768cf768bf359f0fd"
+    },
+    {
+      "case": "i",
+      "repeat": 2,
+      "file": "run-45247679226-i2.zip",
+      "sha256": "c43432f19f061ae116c9a8cbd8cf8843ff1384529f5104d1567161590049b35f"
+    },
+    {
+      "case": "i",
+      "repeat": 3,
+      "file": "run-45246424026-i3.zip",
+      "sha256": "a291d2cc01689dbdaa8d051bf71209f616e9152dcf76b77eeccdd25bcad60631"
+    }
+  ],
+  "corrections": [
+    {
+      "path": "h/1/text/metadata.json",
+      "field": "first_mode",
+      "reason": "recorder local-variable shadowing",
+      "reconstructed_from": "protocol design.first_arm after exact model-io scripted-response match",
+      "before_sha256": "bc2c056f94709577f93503a462c9f896de3fd1daf640823e3d090433fbc14a44",
+      "after_sha256": "b1c0829c02c4c1e0f62014bbfb44b6e380554545b4b2f13e64c8e2a8241a20c5"
+    },
+    {
+      "path": "h/1/text-source/metadata.json",
+      "field": "first_mode",
+      "reason": "recorder local-variable shadowing",
+      "reconstructed_from": "protocol design.first_arm after exact model-io scripted-response match",
+      "before_sha256": "795838ae03fe474e8a6f0fffcd956a48effac1118bb6593a07996cbae7e9ccff",
+      "after_sha256": "2932ce9f8e7ab10374385469d29cd2b02f8d729ec398d140a1537d9124374590"
+    },
+    {
+      "path": "h/2/text/metadata.json",
+      "field": "first_mode",
+      "reason": "recorder local-variable shadowing",
+      "reconstructed_from": "protocol design.first_arm after exact model-io scripted-response match",
+      "before_sha256": "ffebbccb693adda9451c1e9a26dcd121139fd486cff03f9d7f1504be87616275",
+      "after_sha256": "f30bab8a53add0ecda3b54269d98f6544ffdd5adb120df5df1e645c4ddfb8532"
+    },
+    {
+      "path": "h/2/text-source/metadata.json",
+      "field": "first_mode",
+      "reason": "recorder local-variable shadowing",
+      "reconstructed_from": "protocol design.first_arm after exact model-io scripted-response match",
+      "before_sha256": "f961e780b38176f8b1219f5f52425a87ab77172525b805be9e821566d117eea1",
+      "after_sha256": "60029ac888623ef2e2b7aaf25bab74b8a8bf789df511010a32ac150e548a6b69"
+    },
+    {
+      "path": "h/3/text/metadata.json",
+      "field": "first_mode",
+      "reason": "recorder local-variable shadowing",
+      "reconstructed_from": "protocol design.first_arm after exact model-io scripted-response match",
+      "before_sha256": "09de3a41e51d8a41d6b6667adf92c21926ffb38c30af584068ebb3054ad80118",
+      "after_sha256": "927755abf0f1b9046cc250b9a613c353cb5f343655beb7a5d86c56288a2acadd"
+    },
+    {
+      "path": "h/3/text-source/metadata.json",
+      "field": "first_mode",
+      "reason": "recorder local-variable shadowing",
+      "reconstructed_from": "protocol design.first_arm after exact model-io scripted-response match",
+      "before_sha256": "5cd913a710c309f3fb6ac7e90c2bf59e39768b0107d1276055941b9ffc53fee4",
+      "after_sha256": "f248bbbde16fb0ae909549f6e2a427cfa1d01a514bf4c358e5a6f8e89bf87831"
+    },
+    {
+      "path": "i/1/text/metadata.json",
+      "field": "first_mode",
+      "reason": "recorder local-variable shadowing",
+      "reconstructed_from": "protocol design.first_arm after exact model-io scripted-response match",
+      "before_sha256": "874d8df02c4ca7ec78374eb2aa28509241de6cf8305a5e70b799c20ad8217ffa",
+      "after_sha256": "59badfe4ecf4eba35cf49fe55058c53ff9ecdf02e0e9a97cfcf9c42c71b254a1"
+    },
+    {
+      "path": "i/1/text-source/metadata.json",
+      "field": "first_mode",
+      "reason": "recorder local-variable shadowing",
+      "reconstructed_from": "protocol design.first_arm after exact model-io scripted-response match",
+      "before_sha256": "09ade543f549783b40b45719a0fe00be23ede8b8c1f975a88ca7a00a39d0b923",
+      "after_sha256": "56f3073f37cf2fae1070c6b3910716612fddc3ef02b76f2f12d449742ddcae32"
+    },
+    {
+      "path": "i/2/text/metadata.json",
+      "field": "first_mode",
+      "reason": "recorder local-variable shadowing",
+      "reconstructed_from": "protocol design.first_arm after exact model-io scripted-response match",
+      "before_sha256": "9e0d1e83e4bb335303ce6afe5b057b4142f30f5662ca0dfcd7d66ad33178916e",
+      "after_sha256": "3d50d521150c8f9cec5f8ae6c616994529b215f9c480eb33f371eb51521e4b83"
+    },
+    {
+      "path": "i/2/text-source/metadata.json",
+      "field": "first_mode",
+      "reason": "recorder local-variable shadowing",
+      "reconstructed_from": "protocol design.first_arm after exact model-io scripted-response match",
+      "before_sha256": "df69774a8ec58d9c91b4bf9f604e015dfd180f2e6b0b3e53086cea026a875321",
+      "after_sha256": "56b0984095d1a72fcb841e2f0437f812c24ae3bc8455f9222f069c108a1e1754"
+    },
+    {
+      "path": "i/3/text/metadata.json",
+      "field": "first_mode",
+      "reason": "recorder local-variable shadowing",
+      "reconstructed_from": "protocol design.first_arm after exact model-io scripted-response match",
+      "before_sha256": "ed3477f16a2984b6e6431e7f2f16a9af3418cd643102e7c2ecd0913473cf3a66",
+      "after_sha256": "20e88f0ff850017e7fb2c8c665c9593949ef94c5d33b4646a4fec97f4ae3f7b7"
+    },
+    {
+      "path": "i/3/text-source/metadata.json",
+      "field": "first_mode",
+      "reason": "recorder local-variable shadowing",
+      "reconstructed_from": "protocol design.first_arm after exact model-io scripted-response match",
+      "before_sha256": "0899394497c5f9f36248b012e3443512785e229baf9c28cca989fcebe42b01b6",
+      "after_sha256": "405bdb843f177efd5d01ef489a5341d1007257d512187c5fbfc468f6852aed12"
+    }
+  ]
+}
