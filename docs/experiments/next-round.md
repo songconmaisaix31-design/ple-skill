@@ -4,6 +4,8 @@
 
 当前冻结重跑是 [GitHub Actions 45247679226](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45247679226)，运行提交为 [`de4be676`](https://github.com/songconmaisaix31-design/ple-skill/tree/de4be67625116a599f8c5d39d3eb10ed117db03c)。两组仍共用第 250 秒释放的失败首答，第 395 秒读取实际交付文件；模型、提示词、种子、配对顺序、输入和评分器均未改变。只对账户无关的模型下载器加入 HTTP/1.1、断点续传和全错误重试，修复已观察到的 9.92 GB GGUF 传输中断。接续时只轮询该运行及下面较早运行中尚未结束的整对，不再另开运行。
 
+该运行的首次 H1 作业在 40 分钟上限被取消且没有上传工件；同一运行中的另外五个整对均已成功归档。只对 H1 使用 GitHub 的单作业重跑，当前作业为 [137973972058](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45247679226/job/137973972058)，仍使用 `de4be676` 和完全相同的配对设置。其他整对不重跑。主分析按第一份完整有效整对固定：I3 使用较早运行 `45246424026` 的工件，H3、I1、I2、H2 使用当前运行首次尝试的工件，H1 使用本次技术补跑中第一份有效工件。
+
 无效尝试按时间保留，不进入分数分析：
 
 - [45245652599](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45245652599)，提交 `5ff7fbf5`：独立实验分支缺少协议指定的历史 D 证据包，六组在模型加载前由正负对照终止，无推理、无分数。
