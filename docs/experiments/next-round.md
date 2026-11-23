@@ -2,9 +2,15 @@
 
 ## H/I 受控修复实验正在执行
 
-H/I 六个同机配对已在 [GitHub Actions 45245913028](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45245913028) 启动。冻结的运行提交为 [`9fcdb2b8`](https://github.com/songconmaisaix31-design/ple-skill/tree/9fcdb2b859cf0cd892cc3d2638642df6b8f00ca0)，两组共用第 250 秒释放的失败首答，第 395 秒读取实际交付文件。六个任务均通过输入、故障程序、独立评分器、源码反馈包装器和 Docker 传输自检后进入配对运行。接续时沿用该 run ID，已有结果先归档并从文件复评。
+当前冻结重跑是 [GitHub Actions 45247679226](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45247679226)，运行提交为 [`de4be676`](https://github.com/songconmaisaix31-design/ple-skill/tree/de4be67625116a599f8c5d39d3eb10ed117db03c)。两组仍共用第 250 秒释放的失败首答，第 395 秒读取实际交付文件；模型、提示词、种子、配对顺序、输入和评分器均未改变。只对账户无关的模型下载器加入 HTTP/1.1、断点续传和全错误重试，修复已观察到的 9.92 GB GGUF 传输中断。接续时只轮询该运行及下面较早运行中尚未结束的整对，不再另开运行。
 
-首次启动 [45245652599](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45245652599) 在模型加载前由正负对照终止。原因是独立实验分支没有携带协议指定的历史 D 证据包。六个任务均未开始推理或产生实验分数。该尝试保留为基础设施失败；补入 SHA-256 为 `511905b2bc72f17b92abf364eade2e2cfd2b060b86419796197f37968b5204e7` 的只读证据包后启动当前运行。
+无效尝试按时间保留，不进入分数分析：
+
+- [45245652599](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45245652599)，提交 `5ff7fbf5`：独立实验分支缺少协议指定的历史 D 证据包，六组在模型加载前由正负对照终止，无推理、无分数。
+- [45245913028](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45245913028)，提交 `9fcdb2b8`：证据包及离线链通过，但记录器仍按旧 F/G 协议读取 `split.cases`，触发 `KeyError: cases`；缺少合格的整对记录，结果不进入分析。
+- [45246424026](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45246424026)，提交 `55a02ad1`：记录器协议兼容已修复。已结束的整对都在 `model_start` 阶段失败，`startup.log` 一致显示 Hugging Face 下载的 HTTP/2 流被 `CANCEL`，没有实验观测。若该运行中较晚结束的某整对形成完整、可独立复评的记录，仍按时间优先使用该整对；失败整对使用当前冻结重跑中的第一份有效记录。
+
+下载可靠性提交 [`c3d73111`](https://github.com/songconmaisaix31-design/ple-skill/commit/c3d73111cd1f90ae57fb3e9fdef27c23152989e8) 因普通 push 另触发了 [45247632095](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45247632095)。它不是 H/I 配对矩阵，不进入本实验，也不作为分数证据。
 
 ## F/G 已完成，保留首轮 Python 基线
 
