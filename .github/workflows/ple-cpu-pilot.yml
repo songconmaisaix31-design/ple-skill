@@ -3,6 +3,13 @@ name: PLE CPU model pilot
 on:
   push:
     branches: [codex/ple-cpu-cloud-pilot]
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Model to test
+        type: choice
+        options: [auto, gemma26, granite]
+        default: auto
 
 permissions:
   contents: read
@@ -34,6 +41,8 @@ jobs:
 
       - name: Start the account-free CPU model and verify a real synthetic tool call
         shell: bash
+        env:
+          PROFILE: ${{ inputs.model || (github.event.head_commit.message == 'Test Granite on the cloud CPU' && 'granite') || 'auto' }}
         run: |
           umask 077
           export MODEL_PROXY_URL=http://127.0.0.1:4102
@@ -44,7 +53,12 @@ jobs:
           printf '::add-mask::%s\n' "$MODEL_PROXY_KEY"
           export MODEL_API_KEY="$MODEL_PROXY_KEY"
           python="$RUNNER_TEMP/ple-official/.venv/bin/python"
-          for profile in gemma26 granite; do
+          case "$PROFILE" in
+            auto) profiles=(gemma26 granite) ;;
+            gemma26|granite) profiles=("$PROFILE") ;;
+            *) exit 1 ;;
+          esac
+          for profile in "${profiles[@]}"; do
             if bash devtools/start_cpu_model.sh "$profile"; then
               source "$PLE_CPU_STATE/model.env"
               if MODEL_API="$PLE_CPU_MODEL_API" MODEL_NAME="$PLE_CPU_MODEL_NAME" "$python" -m devtools.cloud_model_probe; then
