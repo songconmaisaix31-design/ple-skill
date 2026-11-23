@@ -182,3 +182,4 @@
     "implementation_lock": "Before dispatch, commit the runner, scripted first response, pristine-case preparation and host-only scorer to one immutable experiment SHA. Record the SHA, run ID and job IDs. Replay one positive and negative control through the production wrapper before starting inference."
   }
 }
+
