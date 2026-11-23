@@ -1,0 +1,139 @@
+{
+  "cases": [
+    "d",
+    "e"
+  ],
+  "seed": 17,
+  "declared_budget_sec": 720,
+  "snapshot_sec": 395,
+  "complete": true,
+  "missing_rows": [],
+  "unmeasured_rows": [],
+  "counts_by_arm": {
+    "legacy": {
+      "planned": 6,
+      "measured": 6,
+      "feasible": 0,
+      "optimal": 0
+    },
+    "text": {
+      "planned": 6,
+      "measured": 6,
+      "feasible": 3,
+      "optimal": 3
+    }
+  },
+  "paired_results_by_case": {
+    "d": {
+      "planned_pairs": 3,
+      "measured_pairs": 3,
+      "measured_by_arm": {
+        "legacy": 3,
+        "text": 3
+      },
+      "wins": 0,
+      "ties": 3,
+      "losses": 0,
+      "mean_paired_difference": 0.0,
+      "pairs": [
+        {
+          "repeat": 1,
+          "legacy": 0.0,
+          "text": 0.0,
+          "text_minus_legacy": 0.0
+        },
+        {
+          "repeat": 2,
+          "legacy": 0.0,
+          "text": 0.0,
+          "text_minus_legacy": 0.0
+        },
+        {
+          "repeat": 3,
+          "legacy": 0.0,
+          "text": 0.0,
+          "text_minus_legacy": 0.0
+        }
+      ]
+    },
+    "e": {
+      "planned_pairs": 3,
+      "measured_pairs": 3,
+      "measured_by_arm": {
+        "legacy": 3,
+        "text": 3
+      },
+      "wins": 3,
+      "ties": 0,
+      "losses": 0,
+      "mean_paired_difference": 1.0,
+      "pairs": [
+        {
+          "repeat": 1,
+          "legacy": 0.0,
+          "text": 1.0,
+          "text_minus_legacy": 1.0
+        },
+        {
+          "repeat": 2,
+          "legacy": 0.0,
+          "text": 1.0,
+          "text_minus_legacy": 1.0
+        },
+        {
+          "repeat": 3,
+          "legacy": 0.0,
+          "text": 1.0,
+          "text_minus_legacy": 1.0
+        }
+      ]
+    }
+  },
+  "case_macro_score_by_repeat": [
+    {
+      "repeat": 1,
+      "legacy": 0.0,
+      "text": 0.5,
+      "text_minus_legacy": 0.5
+    },
+    {
+      "repeat": 2,
+      "legacy": 0.0,
+      "text": 0.5,
+      "text_minus_legacy": 0.5
+    },
+    {
+      "repeat": 3,
+      "legacy": 0.0,
+      "text": 0.5,
+      "text_minus_legacy": 0.5
+    }
+  ],
+  "across_repeat_statistics": {
+    "legacy": {
+      "n": 3,
+      "mean": 0.0,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    },
+    "text": {
+      "n": 3,
+      "mean": 0.5,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    },
+    "text_minus_legacy": {
+      "n": 3,
+      "mean": 0.5,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    }
+  },
+  "registered_decision": "support_on_this_family",
+  "registered_rule": {
+    "positive_same_family": "All six pairs measured, neither held-out case has a negative mean paired difference, and all three repeat-level mean differences are positive. Keep the first-action module as a candidate only for small eligible Gemma CPU runs.",
+    "otherwise": "Mixed, tied or incomplete evidence does not support a general default switch. Keep both strategies available for controlled experiments.",
+    "official": "Never promote the official competition configuration on the strength of these two same-family cases. Confirm on a separately frozen task family or official evaluation."
+  },
+  "interpretation": "The mean and sample variance (n-1 denominator) describe repetition-level case averages at one fixed seed. A tied observed difference supplies no evidence of superiority. An equivalence claim would require a separately specified equivalence margin and test."
+}

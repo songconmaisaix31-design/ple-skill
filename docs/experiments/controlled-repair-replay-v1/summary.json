@@ -1,0 +1,124 @@
+{
+  "cases": [
+    "h",
+    "i"
+  ],
+  "seed": 17,
+  "release_sec": 250,
+  "snapshot_sec": 395,
+  "complete": true,
+  "counts_by_arm": {
+    "text": {
+      "planned": 6,
+      "measured": 6,
+      "repair_requests": 6,
+      "source_exposures": 0,
+      "timing_valid": 6,
+      "completed_repair_responses": 0
+    },
+    "text-source": {
+      "planned": 6,
+      "measured": 6,
+      "repair_requests": 6,
+      "source_exposures": 6,
+      "timing_valid": 6,
+      "completed_repair_responses": 0
+    }
+  },
+  "paired_results_by_case": {
+    "h": {
+      "pairs": [
+        {
+          "repeat": 1,
+          "text": 0.0,
+          "text-source": 0.0,
+          "text_source_minus_text": 0.0
+        },
+        {
+          "repeat": 2,
+          "text": 0.0,
+          "text-source": 0.0,
+          "text_source_minus_text": 0.0
+        },
+        {
+          "repeat": 3,
+          "text": 0.0,
+          "text-source": 0.0,
+          "text_source_minus_text": 0.0
+        }
+      ],
+      "mean_paired_difference": 0.0,
+      "wins": 0,
+      "ties": 3,
+      "losses": 0
+    },
+    "i": {
+      "pairs": [
+        {
+          "repeat": 1,
+          "text": 0.0,
+          "text-source": 0.0,
+          "text_source_minus_text": 0.0
+        },
+        {
+          "repeat": 2,
+          "text": 0.0,
+          "text-source": 0.0,
+          "text_source_minus_text": 0.0
+        },
+        {
+          "repeat": 3,
+          "text": 0.0,
+          "text-source": 0.0,
+          "text_source_minus_text": 0.0
+        }
+      ],
+      "mean_paired_difference": 0.0,
+      "wins": 0,
+      "ties": 3,
+      "losses": 0
+    }
+  },
+  "case_macro_score_by_repeat": [
+    {
+      "repeat": 1,
+      "text": 0.0,
+      "text-source": 0.0,
+      "text_source_minus_text": 0.0
+    },
+    {
+      "repeat": 2,
+      "text": 0.0,
+      "text-source": 0.0,
+      "text_source_minus_text": 0.0
+    },
+    {
+      "repeat": 3,
+      "text": 0.0,
+      "text-source": 0.0,
+      "text_source_minus_text": 0.0
+    }
+  ],
+  "across_repeat_statistics": {
+    "text": {
+      "n": 3,
+      "mean": 0.0,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    },
+    "text-source": {
+      "n": 3,
+      "mean": 0.0,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    },
+    "text_source_minus_text": {
+      "n": 3,
+      "mean": 0.0,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    }
+  },
+  "registered_decision": "stop_candidate_no_gain",
+  "interpretation": "This controlled diagnostic estimates recovery conditional on one fixed induced failure. It does not estimate natural failure frequency or an official PLE score."
+}

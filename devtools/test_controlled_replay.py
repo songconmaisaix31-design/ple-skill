@@ -6,10 +6,14 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import time
+from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import run_design_regression as runner
+from skillkit import code_action
 from skillkit.code_action import program_from, repair_source_excerpt
 
 
@@ -17,12 +21,13 @@ class LiveStub:
     model = "gemma-4-26b"
     mode = "openai"
 
-    def __init__(self):
+    def __init__(self, content="delegated"):
         self.calls = 0
+        self.content = content
 
     async def chat(self, messages, system, tools=None, **kwargs):
         self.calls += 1
-        return {"content": "delegated", "tool_calls": [], "usage": {}, "finish_reason": "stop"}
+        return {"content": self.content, "tool_calls": [], "usage": {}, "finish_reason": "stop"}
 
 
 async def check_provider():
@@ -52,8 +57,47 @@ async def check_provider():
             records = [json.loads(line) for line in archive.path.read_text().splitlines()]
             assert records[0]["body"]["temperature"] == 0 and records[0]["body"]["seed"] == 17
             assert records[1]["scripted"] is True and records[2]["status"] == "complete"
+
+            patch_archive = runner.ModelIOArchive(Path(temporary) / "patch.jsonl")
+            patch_live = LiveStub('{"line":81,"replacement":"\'total_pump_units\': sum(combination),"}')
+            patch_events, patch_attempts = {}, []
+            patch_model = runner.ControlledPatchModel(
+                patch_live, source, elapsed, patch_archive, patch_attempts, patch_events)
+            await patch_model.chat([{"role": "user", "content": "frozen"}], "system", tools=[])
+            patch_archive.request({"model": patch_live.model, "messages": [], "max_tokens": 96})
+            repaired = await patch_model.chat([{"role": "user", "content": "repair"}], "system")
+            recovered, state = program_from(repaired, "text")
+            assert state == "valid" and recovered != source
+            assert "'total_pump_units': sum(combination)," in recovered
+            assert patch_events["patch_application"]["accepted"] is True
+            assert patch_live.calls == 1
+            assert patch_archive.finish()["complete"] is True
         finally:
             runner.CONTROLLED_RELEASE_SEC = old_release
+
+
+async def check_repair_routing():
+    source = runner.controlled_program()
+    diagnostics = ('Traceback (most recent call last):\n'
+                   '  File "<run_python>", line 81, in <module>\n'
+                   "TypeError: 'int' object is not subscriptable\n")
+
+    async def chat(*args, **kwargs):
+        return {"content": source, "usage": {}, "finish_reason": "stop"}
+
+    async def execute(call, on_execution):
+        assert call["arguments"]["code"] == source
+        on_execution({"ok": False, "exit_code": 1, "output": diagnostics})
+
+    async def check():
+        return "PASS", ""
+
+    harness = SimpleNamespace(model=SimpleNamespace(chat=chat), steps=0,
+                              _do=execute, _check_deliverable=check)
+    with patch.dict("os.environ", {"PLE_REPAIR_CONTEXT": "source"}):
+        observation = await code_action.first_action(
+            harness, "text", [], None, lambda message: None, None, time.monotonic)
+    assert observation.endswith(repair_source_excerpt(source, diagnostics))
 
 
 def main():
@@ -65,8 +109,22 @@ def main():
     assert excerpt.startswith("\n\nFirst program source near traceback line 81:\n")
     assert "81: " in excerpt and len(excerpt) <= 800
     assert repair_source_excerpt(source, "TypeError: no trusted frame") == ""
+    valid = '{"line":81,"replacement":"\'total_pump_units\': sum(combination),"}'
+    repaired, event = runner.apply_constrained_patch(source, valid)
+    assert repaired is not None and event["accepted"] is True
+    invalid = (
+        '{"line":80,"replacement":"x = 1"}',
+        '```json\n{"line":81,"replacement":"x = 1"}\n```',
+        '{"line":81,"replacement":"x = 1","extra":true}',
+        '{"line":81,"replacement":"x = 1\\ny = 2"}',
+        '{"line":81,"replacement":"if:"}',
+    )
+    for raw in invalid:
+        transformed, rejected = runner.apply_constrained_patch(source, raw)
+        assert transformed is None and rejected["accepted"] is False
+    asyncio.run(check_repair_routing())
     asyncio.run(check_provider())
-    print("controlled replay provider, source excerpt and delegation verified")
+    print("controlled replay provider, source excerpt, patch guard and delegation verified")
 
 
 if __name__ == "__main__":

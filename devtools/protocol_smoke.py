@@ -71,44 +71,6 @@ async def check_python_output():
         assert output.read_bytes() == b'{"count": 7}\n'
 
 
-async def check_compact_package():
-    task = ("Read `input/source.json`. Write two files to `output/`: "
-            "`output/report.json` and `output/details.csv`.")
-    data = b'{"count": 7}'
-    mcp = [{"name": "measurements", "url": "http://127.0.0.1:8123/tools",
-            "transport": "streamable-http"}]
-
-    async def prompt(instruction, files, servers=None):
-        snapshot = f"--- task.md ---\n{instruction}\n--- tree ---\n./task.md\n{files}"
-        transport = SimpleNamespace(exec=AsyncMock(return_value={"output": snapshot}),
-                                    read_file=AsyncMock(return_value=data))
-        model = SimpleNamespace(chat=AsyncMock(return_value={"tool_calls": [
-            {"id": "done", "name": "finish", "arguments": {"final_message": "Done."}},
-        ]}))
-        harness = Harness(transport, model, instruction, mcp_servers=servers)
-        harness.guard.run = AsyncMock(return_value=("PASS", ""))
-        await harness.run()
-        messages, system = model.chat.await_args.args
-        return messages[0]["content"], system, transport.read_file.await_args_list
-
-    files = "./input/source.json\n"
-    user, system, reads = await prompt(task, files)
-    assert len(reads) == 1 and reads[0].args == ("input/source.json",), reads
-    assert data.decode() in user
-    assert "output/report.json, output/details.csv" in system
-    assert "leave output_path unset" in system and "ROUTED SKILL" not in system
-    assert task not in system
-
-    for instruction, listing, servers in (
-        (task + " Read `input/drawing.pdf` for required dimensions.", files + "./input/drawing.pdf\n", None),
-        (task, files + "./additional_conditions.txt\n", None),
-        (task, files, mcp),
-    ):
-        user, system, reads = await prompt(instruction, listing, servers)
-        assert not reads and data.decode() not in user
-        assert "ROUTED SKILL" in system and "leave output_path unset" not in system
-
-
 async def check_mcp_results():
     url = "http://127.0.0.1:8123/tools"
     transport = SimpleNamespace(http=AsyncMock())
@@ -391,7 +353,6 @@ def serve_port():
 async def main():
     check_contracts()
     await check_python_output()
-    await check_compact_package()
     await check_mcp_results()
     await check_exact_mcp_copy()
     stub = MessagesStub()
@@ -437,7 +398,7 @@ async def main():
             output, _ = await proc.communicate()
             if output:
                 print(output.decode(errors="replace").rstrip(), file=sys.stderr)
-    print("PROTOCOL SMOKE: PASS (output contracts, compact package, Python forwarding and save, MCP results, native turns, guard retry, cancel, HTTP 400)")
+    print("PROTOCOL SMOKE: PASS (output contracts, Python forwarding and save, MCP results, native turns, guard retry, cancel, HTTP 400)")
 
 
 if __name__ == "__main__":

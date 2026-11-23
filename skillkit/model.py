@@ -19,9 +19,8 @@ PYTHON_SOURCE_MAX = 16_384
 TOOLS = [
     {"name": "exec",
      "description": "Run a bash command in the task container, starting in the workdir. "
-                    "Only filesystem state persists between calls. Use python3 (python-docx, "
-                    "openpyxl, pandas, libreoffice and pdftotext are installed) for anything "
-                    "structural: building docx/xlsx, unzipping inputs, parsing PDFs.",
+                    "Only filesystem state persists between calls. Use python3 and available task-side "
+                    "libraries or utilities for documents, workbooks, archives and PDFs.",
      "parameters": {"type": "object",
                     "properties": {"command": {"type": "string"},
                                    "timeout_sec": {"type": "integer", "default": 120}},
@@ -42,9 +41,11 @@ TOOLS = [
                                                                   "For .json, print one valid JSON value."}},
                     "required": ["code"]}},
     {"name": "read_file",
-     "description": "Read a file from the task container. Returns utf-8 text when the bytes "
-                    "decode cleanly, otherwise base64 with a marker. 10 MB cap.",
-     "parameters": {"type": "object", "properties": {"path": {"type": "string"}},
+     "description": "Read UTF-8 text from the task container or get a binary-file marker. "
+                    "XLSX files return worksheet names and a bounded cell preview with formulas and stored cache values.",
+     "parameters": {"type": "object", "properties": {"path": {"type": "string"},
+                    "sheet": {"type": "string", "description": "XLSX only. Exact worksheet name, default first visible worksheet."},
+                    "cell_range": {"type": "string", "description": "XLSX only. A1 range of at most 96 cells, default A1:H12."}},
                     "required": ["path"]}},
     {"name": "write_file",
      "description": "Write text (or base64 when `b64` is true) to a path in the task container. "

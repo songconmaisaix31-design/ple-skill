@@ -16,6 +16,7 @@ from .guard import Guard
 from .mcp import declared_output_path, exact_copy_contract, exact_tool_text, named_output_paths, result_excerpt
 from .model import MCP_OUTPUT_TOOLS, PYTHON_SOURCE_MAX, PYTHON_TIMEOUT_DEFAULT, PYTHON_TIMEOUT_MAX
 from .transport import quote_path
+from .workbook import workbook_preview
 
 MAX_STEPS = 240
 WORK_BUDGET = 0.94      # leave time for a final structural check
@@ -27,6 +28,7 @@ NAMED_TEXT_INPUT = re.compile(
     r"(?<![\w./-])(?:\./)?(inputs?/(?:[\w-]+/)*[\w.-]+\.(?:json|csv|txt))"
     r"(?=$|[\s`\"'(),.;:])", re.IGNORECASE,
 )
+
 DATA_FILE_TYPES = (".json", ".csv", ".txt")
 NAMED_FILE = re.compile(r"(?<![\w./-])([A-Za-z0-9_./-]+\.[A-Za-z][A-Za-z0-9]{1,9})"
                         r"(?![\w/-]|\.[\w.-])")
@@ -42,7 +44,7 @@ Non-negotiables:
   a checklist and verify its exact paths, filenames, column headers and required contents
   against the task instructions and relevant input documents.
 - Work inside the task container with exec/run_python/read_file/write_file/mcp_call.
-  python3 is present with python-docx, openpyxl, pandas, libreoffice and pdftotext.
+  Check task-side availability before relying on python-docx, openpyxl, pandas, LibreOffice or pdftotext.
 - Read the task inputs before writing. Reconcile conflicting documents explicitly and say
   which one governs.
 - Land a first complete, openable version of the deliverable early (by roughly step 10-20),
@@ -61,7 +63,7 @@ Tool notes:
   in the first run_python calculation so the tool calculates and saves it in one call.
   When setting output_path, send any diagnostics to stderr.
 - write_file creates parent directories. Use append for large files.
-- Build docx/xlsx with python-docx/openpyxl scripts you write, then run them with exec.
+- When available, use python-docx or openpyxl to build DOCX or XLSX files in the task container.
 """
 
 
@@ -122,7 +124,6 @@ class Harness:
         path = self.spec.get("deliverable") or ""
         return (
             path.lower().endswith((".json", ".csv", ".txt"))
-            and len(self.spec.get("required_files") or []) <= 1
             and len(self.spec.get("all_named_files") or []) <= 1
             and (self.spec.get("claimed_count") or 1) == 1
         )
@@ -171,7 +172,7 @@ class Harness:
         return loaded, "--- tree ---\n" + tree
 
     def _system(self, snapshot, compact_package=False):
-        single_data_file = self._single_data_file()
+        single_data_file = not compact_package and self._single_data_file()
         if single_data_file:
             parts = [
                 "Deliver the requested file in the task workspace. Use the file contents already "
@@ -397,7 +398,10 @@ class Harness:
             tag = "" if r.get("ok") else f"[exit {r.get('exit_code')}] "
             return f"{tag}{body}"
         if name == "read_file":
-            data = await self.t.read_file(a.get("path", ""))
+            path = a.get("path", "")
+            if isinstance(path, str) and path.lower().endswith(".xlsx"):
+                return await workbook_preview(self.t, path, a.get("sheet"), a.get("cell_range", "A1:H12"))
+            data = await self.t.read_file(path)
             if data is None:
                 return "[read_file] not found: " + str(a.get("path"))
             try:
@@ -507,7 +511,10 @@ class Harness:
 
     async def _run(self, on_usage, on_log, wrap_at, clock, work_deadline):
         snapshot = await self._snapshot()
-        package_inputs, snapshot = await self._compact_package(snapshot)
+        mode = code_action.enabled_mode(self)
+        package_inputs = []
+        if mode:
+            package_inputs, snapshot = await self._compact_package(snapshot)
         system = self._system(snapshot, compact_package=bool(package_inputs))
         on_log(f"spec: {self.spec.get('deliverable')} mode={self.spec.get('mode')} "
                f"conf={self.spec.get('confidence')} | skill={self.route['domain']}"
@@ -536,7 +543,7 @@ class Harness:
             prompt += "\n\nBegin. First read the inputs you need, then build."
         messages = [{"role": "user", "content": prompt}]
 
-        if mode := code_action.enabled_mode(self, package_inputs):
+        if mode and package_inputs:
             program_prompt = prompt + "\n\nDeclared file requirements:\n" + _fmt_contract(self.spec)
             observation = await code_action.first_action(
                 self, mode, [{"role": "user", "content": program_prompt}],

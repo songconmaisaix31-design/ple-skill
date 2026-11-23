@@ -36,10 +36,10 @@ FORMAT = {
 }
 
 
-def enabled_mode(harness, package_inputs):
+def enabled_mode(harness):
     mode = os.environ.get("PLE_CODE_ACTION", "0").strip().lower()
     mode = "text" if mode == "1" else mode
-    if (mode not in FORMAT or not package_inputs or harness.mcp
+    if (mode not in FORMAT or harness.mcp
             or not isinstance(harness.t, WSTransport) or harness.t.cancelled.is_set()
             or (mode == "native" and getattr(harness.model, "mode", None) != "openai")):
         return None
@@ -90,8 +90,6 @@ def repair_source_excerpt(program, diagnostics):
     trace = trace.rstrip("\n")
     if not found or not trace.startswith('  File '):
         return ""
-    # Ignore free-form output and outer call sites when the inner frame belongs
-    # to the task's libraries or to some other dynamically constructed program.
     frames = list(TRACEBACK_FRAME.finditer(trace))
     if (not frames or frames[-1][1] != "<run_python>"
             or "\n  File " in trace[frames[-1].end():]):

@@ -1,0 +1,13 @@
+case,repeat,arm,order,seed,score,feasible,optimal,measured,submitted_cost_cents,first_verified_sec,evidence_status,transcript_complete,requests_archived,responses_archived,programs_recovered,programs_parseable,git_sha,repair_requested,source_feedback_observed,source_line,completed_files
+f,1,text,1,17,1.0,1,1,1,77,251.686,regraded,1,2,1,1,1,9c1a00a40c8e40212ea1e97c93824366889ddb8e,0,0,,2
+f,1,text-source,2,17,1.0,1,1,1,77,245.75,regraded,1,2,1,1,1,9c1a00a40c8e40212ea1e97c93824366889ddb8e,0,0,,2
+f,2,text,2,17,1.0,1,1,1,77,229.019,regraded,1,2,1,1,1,9c1a00a40c8e40212ea1e97c93824366889ddb8e,0,0,,2
+f,2,text-source,1,17,1.0,1,1,1,77,233.823,regraded,1,2,1,1,1,9c1a00a40c8e40212ea1e97c93824366889ddb8e,0,0,,2
+f,3,text,1,17,1.0,1,1,1,77,259.351,regraded,1,2,1,1,1,9c1a00a40c8e40212ea1e97c93824366889ddb8e,0,0,,2
+f,3,text-source,2,17,1.0,1,1,1,77,271.076,regraded,1,2,1,1,1,9c1a00a40c8e40212ea1e97c93824366889ddb8e,0,0,,2
+g,1,text,2,17,1.0,1,1,1,110,224.472,regraded,1,2,1,1,1,9c1a00a40c8e40212ea1e97c93824366889ddb8e,0,0,,2
+g,1,text-source,1,17,1.0,1,1,1,110,226.663,regraded,1,2,1,1,1,9c1a00a40c8e40212ea1e97c93824366889ddb8e,0,0,,2
+g,2,text,1,17,1.0,1,1,1,110,184.161,regraded,1,3,2,2,2,9c1a00a40c8e40212ea1e97c93824366889ddb8e,0,0,,2
+g,2,text-source,2,17,1.0,1,1,1,110,188.229,regraded,1,2,1,1,1,9c1a00a40c8e40212ea1e97c93824366889ddb8e,0,0,,2
+g,3,text,2,17,1.0,1,1,1,110,185.663,regraded,1,2,1,1,1,9c1a00a40c8e40212ea1e97c93824366889ddb8e,0,0,,2
+g,3,text-source,1,17,,,,0,,,unmeasured,0,0,0,0,0,9c1a00a40c8e40212ea1e97c93824366889ddb8e,,,,

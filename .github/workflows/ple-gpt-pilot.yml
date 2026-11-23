@@ -50,6 +50,98 @@ jobs:
               raise SystemExit("This repository must declare the eligible GLM-5.2 model.")
           PY
 
+      - name: Verify workbook inputs and optional Python actions
+        shell: bash
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          test_env="$RUNNER_TEMP/ple-workbook-test"
+          uv venv --python "$RUNNER_TEMP/ple-official/.venv/bin/python" "$test_env"
+          uv pip install --python "$test_env/bin/python" -r requirements.txt openpyxl==3.1.5
+          "$test_env/bin/python" devtools/workbook_regression.py
+          "$test_env/bin/python" devtools/code_action_regression.py
+
+      - name: Replay both frozen storage experiments from archived files
+        shell: bash
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          replay_experiment() {
+            local records="docs/experiments/$1" revision="$2" replay="$RUNNER_TEMP/$1"
+            mkdir -p "$replay"
+            python3 devtools/verify_paired_storage_evidence.py \
+              --archive "$records/evidence.zip" --protocol "$records/protocol.json" \
+              --expected-sha "$revision" --csv "$replay/trials.csv" --details "$replay/code-coverage.json"
+            python3 devtools/paired_storage_report.py "$replay/trials.csv" \
+              --protocol "$records/protocol.json" --output "$replay/summary.json"
+            python3 - "$records" "$replay" <<'PY'
+          import csv
+          import json
+          import sys
+          from pathlib import Path
+
+          saved, replay = map(Path, sys.argv[1:])
+          with (saved / "trials.csv").open(newline="") as a, (replay / "trials.csv").open(newline="") as b:
+              archived, rebuilt = csv.DictReader(a), csv.DictReader(b)
+              if archived.fieldnames != rebuilt.fieldnames or list(archived) != list(rebuilt):
+                  raise SystemExit(f"{saved.name}/trials.csv differs from the replay")
+          for name in ("summary.json", "code-coverage.json"):
+              if json.loads((saved / name).read_bytes()) != json.loads((replay / name).read_bytes()):
+                  raise SystemExit(f"{saved.name}/{name} differs from the replay")
+          PY
+          }
+          records=docs/experiments/repair-source-v1
+          python3 devtools/rebuild_repair_source_evidence.py \
+            --first "$records/attempts/attempt-1-evidence.zip" --retry "$records/attempts/attempt-2-evidence.zip" \
+            --protocol "$records/protocol.json" --output "$RUNNER_TEMP/rebuilt-repair-source.zip"
+          python3 - "$records/evidence.zip" "$RUNNER_TEMP/rebuilt-repair-source.zip" <<'PYCODE'
+          import sys
+          from zipfile import ZipFile
+          with ZipFile(sys.argv[1]) as saved, ZipFile(sys.argv[2]) as rebuilt:
+              if saved.namelist() != rebuilt.namelist() or any(saved.read(n) != rebuilt.read(n) for n in saved.namelist()):
+                  raise SystemExit("F/G evidence differs from the selected whole-pair attempts")
+          PYCODE
+          replay_experiment paired-storage-v1 52dc6b2f683dc5295529843530fe2ee4ea6e1c71
+          replay_experiment repair-source-v1 9c1a00a40c8e40212ea1e97c93824366889ddb8e
+
+          controlled=docs/experiments/controlled-repair-replay-v1
+          controlled_replay="$RUNNER_TEMP/controlled-repair-replay-v1"
+          mkdir -p "$controlled_replay"
+          python3 devtools/build_controlled_repair_evidence.py \
+            --protocol "$controlled/protocol.json" \
+            --job h:1:"$controlled/attempts/run-45247679226-h1-attempt2.zip" \
+            --job h:2:"$controlled/attempts/run-45247679226-h2.zip" \
+            --job h:3:"$controlled/attempts/run-45247679226-h3.zip" \
+            --job i:1:"$controlled/attempts/run-45247679226-i1.zip" \
+            --job i:2:"$controlled/attempts/run-45247679226-i2.zip" \
+            --job i:3:"$controlled/attempts/run-45246424026-i3.zip" \
+            --output "$controlled_replay/evidence.zip" \
+            --corrections "$controlled_replay/corrections.json"
+          cmp "$controlled/evidence.zip" "$controlled_replay/evidence.zip"
+          python3 devtools/verify_controlled_repair_evidence.py \
+            --archive "$controlled_replay/evidence.zip" \
+            --protocol "$controlled/protocol.json" \
+            --settings-protocol docs/experiments/repair-source-v1/protocol.json \
+            --expected-sha 55a02ad1bbd3f2afd6d29869e8797a9b879c51e0 \
+            --expected-sha de4be67625116a599f8c5d39d3eb10ed117db03c \
+            --csv "$controlled_replay/trials.csv" \
+            --details "$controlled_replay/code-coverage.json"
+          python3 devtools/controlled_repair_report.py "$controlled_replay/trials.csv" \
+            --output "$controlled_replay/summary.json"
+          python3 - "$controlled" "$controlled_replay" <<'PYCONTROLLED'
+          import csv
+          import json
+          import sys
+          from pathlib import Path
+
+          saved, replay = map(Path, sys.argv[1:])
+          with (saved / "trials.csv").open(newline="") as a, (replay / "trials.csv").open(newline="") as b:
+              archived, rebuilt = csv.DictReader(a), csv.DictReader(b)
+              if archived.fieldnames != rebuilt.fieldnames or list(archived) != list(rebuilt):
+                  raise SystemExit("controlled-repair-replay-v1/trials.csv differs from replay")
+          for name in ("summary.json", "code-coverage.json", "corrections.json"):
+              if json.loads((saved / name).read_bytes()) != json.loads((replay / name).read_bytes()):
+                  raise SystemExit(f"controlled-repair-replay-v1/{name} differs from replay")
+          PYCONTROLLED
+
       - name: Exchange the authorized runner identity for a temporary Hugging Face token
         if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' }}
         shell: bash
@@ -300,6 +392,8 @@ jobs:
           printf '::add-mask::%s\n' "$MODEL_PROXY_KEY"
           python="$RUNNER_TEMP/ple-official/.venv/bin/python"
           for profile in gemma26 granite; do
+            export PLE_CPU_EVAL_GREEDY=false
+            if [[ "$profile" == gemma26 ]]; then export PLE_CPU_EVAL_GREEDY=true; fi
             if bash devtools/start_cpu_model.sh "$profile"; then
               source "$PLE_CPU_STATE/model.env"
               if MODEL_API="$PLE_CPU_MODEL_API" MODEL_NAME="$PLE_CPU_MODEL_NAME" \
@@ -340,10 +434,20 @@ jobs:
             openai/gpt-6.1-sol|google-cloud/gemma-4-26b|openai-compatible/granite-4.1-3b)
               entry="$RUNNER_TEMP/ple-model-entry"
               git clone --quiet "$GITHUB_WORKSPACE" "$entry"
-              sed -i "s@^model_api: google-cloud/glm-5[.]2\$@model_api: $PLE_MODEL_API@" "$entry/submission.yaml"
-              if [[ "$PLE_MODEL_API" == openai-compatible/* ]]; then
-                printf '\nmodel_base_url: https://llm.example.org/v1\n' >> "$entry/submission.yaml"
-              fi
+              "$RUNNER_TEMP/ple-official/.venv/bin/python" - "$entry/submission.yaml" "$PLE_MODEL_API" <<'PY'
+          import sys
+          from pathlib import Path
+          import yaml
+
+          path, model = Path(sys.argv[1]), sys.argv[2]
+          config = yaml.safe_load(path.read_text())
+          config["model_api"] = model
+          if model == "google-cloud/gemma-4-26b":
+              config.setdefault("env", {})["PLE_CODE_ACTION"] = "text"
+          elif model.startswith("openai-compatible/"):
+              config["model_base_url"] = "https://llm.example.org/v1"
+          path.write_text(yaml.safe_dump(config, sort_keys=False))
+          PY
               git -C "$entry" add submission.yaml
               git -C "$entry" -c user.name='PLE Cloud Pilot' -c user.email='pilot@users.noreply.github.com' \
                 commit --quiet -m 'Select the model for this development run'
