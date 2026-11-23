@@ -12,6 +12,10 @@ try:
 except ImportError:  # pragma: no cover
     httpx = None
 
+PYTHON_TIMEOUT_DEFAULT = 60
+PYTHON_TIMEOUT_MAX = 120
+PYTHON_SOURCE_MAX = 16_384
+
 TOOLS = [
     {"name": "exec",
      "description": "Run a bash command in the task container, starting in the workdir. "
@@ -22,6 +26,16 @@ TOOLS = [
                     "properties": {"command": {"type": "string"},
                                    "timeout_sec": {"type": "integer", "default": 120}},
                     "required": ["command"]}},
+    {"name": "run_python",
+     "description": "Run Python source in the task container, starting in the workdir. "
+                    "Pass Python source directly and print the quantities needed for the next step. "
+                    "Only filesystem state persists between calls.",
+     "parameters": {"type": "object",
+                    "properties": {"code": {"type": "string", "minLength": 1,
+                                            "maxLength": PYTHON_SOURCE_MAX},
+                                   "timeout_sec": {"type": "integer", "default": PYTHON_TIMEOUT_DEFAULT,
+                                                   "minimum": 1, "maximum": PYTHON_TIMEOUT_MAX}},
+                    "required": ["code"]}},
     {"name": "read_file",
      "description": "Read a file from the task container. Returns utf-8 text when the bytes "
                     "decode cleanly, otherwise base64 with a marker. 10 MB cap.",

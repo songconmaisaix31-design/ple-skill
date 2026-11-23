@@ -8,6 +8,7 @@ import asyncio
 import base64
 import json
 import os
+import shlex
 import socket
 import sys
 from pathlib import Path
@@ -15,12 +16,30 @@ from pathlib import Path
 import websockets
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+
+from skillkit import specgen
+
 MODEL = "claude-opus-5-5"
 DELIVERABLE = "/app/smoke.txt"
 DOCUMENT = b"Offline protocol smoke deliverable.\n"
 SUMMARY = "Saved the requested note in /app/smoke.txt."
 USAGE = {"input_tokens": 7, "cache_creation_input_tokens": 11,
          "cache_read_input_tokens": 19, "output_tokens": 23}
+PYTHON_LITERAL = "计算 'single' \"double\" ; $(printf changed) `printf changed`"
+PYTHON_SOURCE = f"label = {PYTHON_LITERAL!r}\nprint(label)\nprint(sum(range(4)))"
+
+
+def check_contracts():
+    rules = [
+        ("Read `input/source.json`. Save the report as\n`output/report.json` under `output/`.",
+         "output/report.json"),
+        ("Write two files to `output/`: `output/report.json` and `output/details.csv`.", "output/"),
+        ("Read `input/source.json`, then inspect task.md.", ""),
+    ]
+    for instruction, expected in rules:
+        actual = specgen.build(instruction)["deliverable"]
+        assert actual == expected, (instruction, actual)
 
 
 def tool(call_id, name, **arguments):
@@ -32,6 +51,8 @@ FIRST_TURN = [
     {"type": "redacted_thinking", "data": "c3R1Yi1yZWRhY3RlZA=="},
     {"type": "text", "text": "I will inspect the workspace."},
     tool("toolu_inspect", "exec", command="ls"),
+    tool("toolu_calculate", "run_python", code=PYTHON_SOURCE, timeout_sec=19),
+    tool("toolu_bad_timeout", "run_python", code=PYTHON_SOURCE, timeout_sec=7.5),
     tool("toolu_early_finish", "finish", final_message="No note yet."),
     tool("toolu_extra_finish", "finish", final_message="Still no note."),
 ]
@@ -56,6 +77,9 @@ class MessagesStub:
             assert headers[0] == "POST /v1/messages HTTP/1.1", headers[0]
             assert fields.get("x-api-key") == "offline-smoke", fields
             assert request["model"] == MODEL, request["model"]
+            python_tool = next(tool for tool in request["tools"] if tool["name"] == "run_python")
+            assert python_tool["input_schema"]["required"] == ["code"], python_tool
+            assert python_tool["input_schema"]["properties"]["timeout_sec"]["type"] == "integer", python_tool
             scenario = next(name for name in self.requests if f"[{name}]" in
                             request["messages"][0]["content"][0]["text"])
             self.requests[scenario] += 1
@@ -91,12 +115,14 @@ class MessagesStub:
         assert messages[-1]["role"] == "user", messages[-1]
         results = messages[-1]["content"]
         assert [block["tool_use_id"] for block in results] == [
-            "toolu_inspect", "toolu_early_finish", "toolu_extra_finish"
+            "toolu_inspect", "toolu_calculate", "toolu_bad_timeout", "toolu_early_finish", "toolu_extra_finish"
         ], results
         assert all(block["type"] == "tool_result" for block in results), results
         assert results[0]["content"] == "empty workspace", results
-        assert "REFUSED" in results[1]["content"], results
-        assert results[2]["content"], results
+        assert results[1]["content"] == f"{PYTHON_LITERAL}\n6\n", results
+        assert "timeout_sec must be an integer" in results[2]["content"], results
+        assert "REFUSED" in results[3]["content"], results
+        assert results[4]["content"], results
         return [tool("toolu_write", "write_file", path=DELIVERABLE, content=DOCUMENT.decode()),
                 tool("toolu_finish", "finish", final_message=SUMMARY)]
 
@@ -130,6 +156,16 @@ async def exchange(url, scenario, stub, timeout=60):
                     passed = files.get(DELIVERABLE) == DOCUMENT
                     guards.append(passed)
                     reply["output"] = "RESULT: PASS\n" if passed else "RESULT: FAIL\nmissing note\n"
+                elif command.startswith("python3 -c "):
+                    args = shlex.split(command)
+                    assert len(args) == 3 and frame["timeout_sec"] == 19, frame
+                    assert base64.b64encode(PYTHON_SOURCE.encode()).decode() in args[-1], frame
+                    process = await asyncio.create_subprocess_exec(
+                        sys.executable, "-c", args[-1], stdout=asyncio.subprocess.PIPE
+                    )
+                    stdout, _ = await process.communicate()
+                    assert process.returncode == 0, frame
+                    reply["output"] = stdout.decode()
                 else:
                     reply["output"] = "empty workspace"
             await ws.send(json.dumps(reply))
@@ -149,6 +185,7 @@ def serve_port():
 
 
 async def main():
+    check_contracts()
     stub = MessagesStub()
     async with await asyncio.start_server(stub.handle, "127.0.0.1", 0) as server:
         stub_port = server.sockets[0].getsockname()[1]
@@ -171,6 +208,7 @@ async def main():
                 assert not stub.failures, stub.failures
                 assert guards == [False, True], guards
                 assert files[DELIVERABLE] == DOCUMENT, files.keys()
+                assert sum(frame.get("command", "").startswith("python3 -c ") for frame in frames) == 1
                 assert frames[-1] == {"type": "done", "final_message": SUMMARY}, frames[-1]
                 usage = {"type": "usage", "model": MODEL, "input_tokens": 37,
                          "output_tokens": 23, "cache_read_tokens": 19}
@@ -191,7 +229,7 @@ async def main():
             output, _ = await proc.communicate()
             if output:
                 print(output.decode(errors="replace").rstrip(), file=sys.stderr)
-    print("PROTOCOL SMOKE: PASS (native turns, guard retry, untimed task, cancel, HTTP 400)")
+    print("PROTOCOL SMOKE: PASS (output contracts, Python forwarding, native turns, guard retry, cancel, HTTP 400)")
 
 
 if __name__ == "__main__":

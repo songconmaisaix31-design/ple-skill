@@ -1,0 +1,119 @@
+name: PLE CPU model pilot
+
+on:
+  push:
+    branches: [codex/ple-cpu-cloud-pilot]
+
+permissions:
+  contents: read
+
+jobs:
+  cpu-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare PLE validation kit
+        shell: bash
+        run: |
+          docker version >/dev/null
+          python3 -m venv "$RUNNER_TEMP/ple-bootstrap"
+          "$RUNNER_TEMP/ple-bootstrap/bin/python" -m pip install --disable-pip-version-check uv
+          echo "$RUNNER_TEMP/ple-bootstrap/bin" >> "$GITHUB_PATH"
+          export PATH="$RUNNER_TEMP/ple-bootstrap/bin:$PATH"
+          kit="$RUNNER_TEMP/ple-official"
+          git init -q "$kit"
+          git -C "$kit" fetch --depth 1 https://github.com/google-research/ple.git 8320f0402fdca9f42476607f72bcfd5271cd50c9
+          git -C "$kit" checkout -q --detach FETCH_HEAD
+          cd "$kit"
+          uv sync
+
+      - name: Start the account-free CPU model and verify a real synthetic tool call
+        shell: bash
+        run: |
+          umask 077
+          export MODEL_PROXY_URL=http://127.0.0.1:4102
+          export MODEL_BASE_URL="$MODEL_PROXY_URL/v1"
+          export PLE_CPU_STATE="$RUNNER_TEMP/ple-cpu"
+          MODEL_PROXY_KEY=$(openssl rand -hex 24)
+          export MODEL_PROXY_KEY
+          printf '::add-mask::%s\n' "$MODEL_PROXY_KEY"
+          export MODEL_API_KEY="$MODEL_PROXY_KEY"
+          python="$RUNNER_TEMP/ple-official/.venv/bin/python"
+          for profile in gemma26 granite; do
+            if bash devtools/start_cpu_model.sh "$profile"; then
+              source "$PLE_CPU_STATE/model.env"
+              if MODEL_API="$PLE_CPU_MODEL_API" MODEL_NAME="$PLE_CPU_MODEL_NAME" "$python" -m devtools.cloud_model_probe; then
+                printf 'MODEL_PROXY_URL=%s\nMODEL_BASE_URL=%s\nMODEL_PROXY_KEY=%s\nMODEL_API_KEY=%s\nPLE_CPU_STATE=%s\n' \
+                  "$MODEL_PROXY_URL" "$MODEL_BASE_URL" "$MODEL_PROXY_KEY" "$MODEL_API_KEY" "$PLE_CPU_STATE" >> "$GITHUB_ENV"
+                cat "$PLE_CPU_STATE/model.env" >> "$GITHUB_ENV"
+                printf '%s completed a native synthetic tool call on the cloud runner.\n' "$PLE_CPU_MODEL_NAME" | tee -a "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              kill "$(cat "$PLE_CPU_STATE/server.pid")" 2>/dev/null || true
+              for _ in {1..10}; do
+                if ! curl --max-time 1 --silent "$MODEL_PROXY_URL/health" >/dev/null; then break; fi
+                sleep 1
+              done
+            fi
+            if [[ "$profile" == gemma26 ]]; then
+              rm -f "$PLE_CPU_STATE/gemma-4-26B-A4B-it-UD-IQ2_XXS.gguf"
+            fi
+          done
+          echo 'No local CPU model produced the required tool call.' >&2
+          exit 1
+
+      - name: Score the independent classroom mechanics diagnostic
+        continue-on-error: true
+        shell: bash
+        run: |
+          image='python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b'
+          docker pull --platform linux/amd64 "$image"
+          MODEL_API="$PLE_CPU_MODEL_API" MODEL_NAME="$PLE_CPU_MODEL_NAME" \
+            "$RUNNER_TEMP/ple-official/.venv/bin/python" devtools/engineering_regression.py \
+            --timeout-sec 420 --docker-image "$image" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Run the official kit synthetic tasks using the real CPU model
+        shell: bash
+        run: |
+          entry="$RUNNER_TEMP/ple-cpu-entry"
+          git clone --quiet "$GITHUB_WORKSPACE" "$entry"
+          sed -i "s@^model_api: .*@model_api: $PLE_CPU_MODEL_API@" "$entry/submission.yaml"
+          args=()
+          if [[ "$PLE_CPU_MODEL_API" == openai-compatible/* ]]; then
+            printf '\nmodel_base_url: https://llm.example.org/v1\n' >> "$entry/submission.yaml"
+            args=(--model-base-url "$MODEL_BASE_URL")
+          fi
+          git -C "$entry" add submission.yaml
+          git -C "$entry" -c user.name='PLE Cloud Pilot' -c user.email='pilot@users.noreply.github.com' \
+            commit --quiet -m 'Select the CPU model for this development test'
+          cd "$RUNNER_TEMP/ple-official"
+          uv run python -m kit validate "$entry"
+          status=0
+          uv run python -m kit check "$entry" --work "$RUNNER_TEMP/ple-kit-cpu" "${args[@]}" || status=$?
+          python3 - "$RUNNER_TEMP/ple-kit-cpu/check.json" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+          import sys
+
+          try:
+              report = json.loads(Path(sys.argv[1]).read_text())
+          except (OSError, ValueError):
+              report = {}
+          results = {row["name"]: row["status"] for row in report.get("stages", [])}
+          print("Official kit synthetic test stages")
+          for stage in ("build", "model", "listen", "smoke", "mcp"):
+              print(f"- {stage}: {results.get(stage, 'not run')}")
+          PY
+          exit "$status"
+
+      - name: Stop the transient model server
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          pid="$RUNNER_TEMP/ple-cpu/server.pid"
+          if [[ -s "$pid" ]]; then kill "$(cat "$pid")" 2>/dev/null || true; fi
