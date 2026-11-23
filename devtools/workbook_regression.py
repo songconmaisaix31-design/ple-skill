@@ -29,6 +29,7 @@ def make_workbook(path):
     sheet.title = "Flow checks"
     sheet["D7"], sheet["E7"] = "flow_lps", 12
     sheet["E8"], sheet["E9"], sheet["E10"] = "=E7*2", "=E7-E7", "=E7*3"
+    sheet["E11"] = '=""'
     hidden = workbook.create_sheet("Calibration")
     hidden.sheet_state = "hidden"
     hidden["K20"] = "reference point"
@@ -38,7 +39,7 @@ def make_workbook(path):
     workbook.close()
 
     # Write only test-fixture cache values. One is deliberately stale (20
-    # instead of 24), one is zero, and E10 keeps its empty cache.
+    # instead of 24), one is zero, E10 has no cache, and E11 caches an empty string.
     with ZipFile(draft) as source, ZipFile(path, "w", ZIP_DEFLATED) as destination:
         for name in source.namelist():
             contents = source.read(name)
@@ -47,6 +48,10 @@ def make_workbook(path):
                 for address, value in (("E8", "20"), ("E9", "0")):
                     cell = tree.find(f".//{SPREADSHEET_NS}c[@r='{address}']")
                     cell.find(f"{SPREADSHEET_NS}v").text = value
+                missing = tree.find(f".//{SPREADSHEET_NS}c[@r='E10']")
+                missing.remove(missing.find(f"{SPREADSHEET_NS}v"))
+                blank = tree.find(f".//{SPREADSHEET_NS}c[@r='E11']")
+                blank.set("t", "str")
                 contents = ET.tostring(tree, encoding="utf-8", xml_declaration=True)
             destination.writestr(name, contents)
 
@@ -78,8 +83,10 @@ async def exercise(root):
     default = await read()
     for expected in ('"Flow checks" (visible)', '"Calibration" (hidden)', "sampled range A1:H12",
                      'D7: value="flow_lps"', 'E8: formula="=E7*2" cached=20',
-                     'E9: formula="=E7-E7" cached=0', 'E10: formula="=E7*3" cached=null'):
+                     'E9: formula="=E7-E7" cached=0', 'E10: formula="=E7*3" cached=null',
+                     "missing or blank", "E11: formula="):
         assert expected in default, default
+    assert any(line.startswith("E11: formula=") and line.endswith("cached=null") for line in default.splitlines())
     alternate = await read(sheet="Calibration", cell_range="K20:K21")
     assert "sampled range K20:K21" in alternate and 'K20: value="reference point"' in alternate, alternate
     assert "E8:" not in alternate and "K21: value=" in alternate and "[value truncated]" in alternate, alternate

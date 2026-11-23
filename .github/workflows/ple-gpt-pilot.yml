@@ -50,7 +50,7 @@ jobs:
               raise SystemExit("This repository must declare the eligible GLM-5.2 model.")
           PY
 
-      - name: Verify workbook evidence with an original fixture
+      - name: Verify workbook inputs and optional Python actions
         shell: bash
         run: |
           unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
@@ -58,6 +58,7 @@ jobs:
           uv venv --python "$RUNNER_TEMP/ple-official/.venv/bin/python" "$test_env"
           uv pip install --python "$test_env/bin/python" -r requirements.txt openpyxl==3.1.5
           "$test_env/bin/python" devtools/workbook_regression.py
+          "$test_env/bin/python" devtools/code_action_regression.py
 
       - name: Exchange the authorized runner identity for a temporary Hugging Face token
         if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' }}

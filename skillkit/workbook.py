@@ -64,7 +64,8 @@ def preview(path, sheet, cell_range):
             print("Workbook-reported used range unavailable.")
         else:
             print(f"Workbook-reported used range {extent} (advisory; may be inaccurate).")
-        print("Formula cache values are saved workbook state and may be stale. null means no cached value; 0 is cached zero.")
+        print("Formula cache values are saved workbook state and may be stale. "
+              "null means the reader returned no value (missing or blank); 0 is cached zero.")
         bounds = {"min_row": first_row, "max_row": last_row, "min_col": first_col, "max_col": last_col}
         cached = load_workbook(path, read_only=True, data_only=True, keep_links=False)
         try:

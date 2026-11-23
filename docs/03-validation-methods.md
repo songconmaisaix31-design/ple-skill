@@ -55,12 +55,26 @@ CodeAct 将可执行的 Python 和程序运行反馈用于多步任务。Hugging
 
 每个 runner 先用固定的两份测试文件经过正式 kit 的 WebSocket、Docker 工作区和文件导出路径，逐字节核对内容。随后新建任务容器运行模型，分别记录模型请求是否被中断、工具是否成功执行、最终目录中两个文件的类型与大小。文件通过结构检查后，评分器复算六个时段的库存、约束和成本。
 
+| Gemma 4 26B A4B 策略 | A 最终成本 | B 最终成本 | C 最终成本 | 首轮程序通过结构检查的秒数（A / B / C） |
+|---|---:|---:|---:|---|
+| 原短提示工具循环 | 92 | 未交付 | 35 | 原流程无同口径事件 |
+| 首轮原生 Python 工具调用 | 92 | 67 | 35 | 216 / 267 / 265 |
+| 首轮直接生成 Python | 92 | 67 | 35 | 241 / 246 / 245 |
+
+单位为美分。每个已交付的方案均经独立评分确认达到最优。B 的原流程两次 Python 执行都以退出码 1 结束，第三次推理在时间耗尽时被中断。终态容器中没有 `output/`，根目录也没有两份同名文件。9 个运行器的文件传输自检均通过。每个算例和策略只运行一次；两种首轮 Python 策略的速度排序随算例变化。此前的短提示运行在 A、B 均未交付，说明单次运行的结果会波动。[九组完整日志](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45204343520)
+
+PR 里的 `PLE_CODE_ACTION=text` 开启文本 Python 首轮，`PLE_CODE_ACTION=native` 在 Chat Completions 接口启用原生工具首轮。未配置时使用原参赛流程。仅当任务明确列出 2–3 个文本输出、同时有少量可完整读取的命名文本输入，且没有 MCP 或附加文档依赖时，才使用新策略。模型代码通过同一任务容器执行；无效、截断或报错的首轮可回退常规工具，后续仍要核实工程结果。
+
 ### Excel 输入取证
 
 旧工具读取工作簿只返回二进制长度。新工具在题目容器内使用 `openpyxl` 只读预览指定工作表和最多 96 个单元格。保留单元格坐标、公式和上次保存的缓存值。工作表声明的使用范围只作为定位提示。原创工作簿中，E7 为 12，E8 的公式为 `=E7*2`，而上次保存的值为 20。测试同时覆盖缓存为零、缺失缓存、隐藏工作表和非默认区域，检查读取前后文件哈希一致。题目镜像缺少 `openpyxl` 时，工具会说明依赖缺失。可用安装了 `openpyxl` 的 Python 运行 `python devtools/workbook_regression.py`。[Encoding Spreadsheets for Large Language Models](https://aclanthology.org/2024.emnlp-main.1154/) · [openpyxl 读取语义](https://openpyxl.readthedocs.io/en/stable/tutorial.html)
+
+两个独立的 GPT-6.1 Sol 会话各接收一次对同一本工作簿的真实 `read_file` 返回，回答相同四问。旧工具只返回 5,497 字节的二进制标记，模型四项均回答未知。新工具让模型答对可见工作表、隐藏工作表、E8 的公式与缓存、独立复算及差异这四项。每组各一轮，模型没有其他工具可用；该试验只测一次读取能提供多少证据。缓存为 `null` 表示读取器没有给出值，空字符串缓存和缺失缓存都可能产生这个结果。
 
 ## 判读边界
 
 官方公开开发榜按 29 道题汇总，每个模型和 harness 组合运行三次。Gemma 4 26B 在所列组合中的分数为 0.007 至 0.053，GLM 5.2 配 Codex 为 0.260。公开榜的模型服务、推理设置和预算与本项目在四核 CPU 上使用的量化模型不同。正式对照要固定模型服务、模型版本、每题时间和评测器，再比较同一批题的逐题分数和产物。[开发榜](https://ple-bench.com/leaderboard?set=dev) · [官方产物规范](https://github.com/google-research/ple/blob/8320f0402fdca9f42476607f72bcfd5271cd50c9/docs/artifacts.md)
 
 正式开发题需要评测进程获得受限数据集的读取权。账户批准访问与 GitHub 运行器换到只读凭据是两个单独的步骤。Hugging Face 的账户 CI/CD identity 可给特定仓库、分支和 workflow 签发短时 `gated-repos` 凭据。CPU 路径只需要读题权限。本次运行器返回 `invalid_grant`，后续设备登录等待超时。修复后的选择器还能区分凭据缺失、拒绝和临时不可用，重新运行后记录为当前没有可用的读题凭据，未产生正式分数。[更新后复验](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45187485602)[正式题记录](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45185198336) · [Hugging Face 身份配置说明](https://huggingface.co/docs/hub/trusted-publishers)
+
+Excel 改动提交后再次运行，官方 kit 的配置校验和独立工作簿回归均通过。工作流身份交换仍返回 `invalid_grant`，凭据选择器也未找到可读取受限题集的凭据，流程止于下载，正式模型和评分步骤均未启动。[云端复跑](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45204574378/job/137796706042)

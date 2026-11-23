@@ -152,43 +152,48 @@ class ModelClient:
                 items.append({"role": role, "content": message.get("content") or ""})
         return items
 
-    async def chat(self, messages, system, tools=None):
-        tools = tools or TOOLS
-        payload = await self._request(messages, system, tools)
+    async def chat(self, messages, system, tools=None, *, max_tokens=None, tool_choice=None):
+        tools = TOOLS if tools is None else tools
+        payload = await self._request(messages, system, tools, max_tokens=max_tokens, tool_choice=tool_choice)
         return payload
 
-    async def _request(self, messages, system, tools):
+    async def _request(self, messages, system, tools, *, max_tokens=None, tool_choice=None):
         if httpx is None:
             raise RuntimeError("httpx missing")
+        max_tokens = self.max_tokens if max_tokens is None else max_tokens
         headers = {"content-type": "application/json"}
         if self.mode == "anthropic":
             url = self.base_url + "/v1/messages"
             headers["x-api-key"] = self.api_key or ""
             headers["anthropic-version"] = "2023-06-01"
-            body = {"model": self.model, "max_tokens": self.max_tokens,
+            body = {"model": self.model, "max_tokens": max_tokens,
                     "system": [{"type": "text", "text": system,
                                 "cache_control": {"type": "ephemeral"}}],
-                    "messages": self._to_anthropic(messages),
-                    "tools": [{"name": t["name"], "description": t["description"],
-                               "input_schema": t["parameters"]} for t in tools]}
+                    "messages": self._to_anthropic(messages)}
+            if tools:
+                body["tools"] = [{"name": t["name"], "description": t["description"],
+                                  "input_schema": t["parameters"]} for t in tools]
         elif self.mode == "responses":
             url = self.base_url + ("/responses" if self.base_url.endswith("/v1") else "/v1/responses")
             headers["authorization"] = "Bearer " + (self.api_key or "")
-            body = {"model": self.model, "max_output_tokens": self.max_tokens,
+            body = {"model": self.model, "max_output_tokens": max_tokens,
                     "instructions": system, "input": self._to_responses(messages),
-                    "tools": [{"type": "function", **t, "strict": False} for t in tools],
-                    "tool_choice": "auto", "store": False,
+                    "store": False,
                     "include": ["reasoning.encrypted_content"]}
+            if tools:
+                body["tools"] = [{"type": "function", **t, "strict": False} for t in tools]
+                body["tool_choice"] = "auto"
             if self.reasoning_effort:
                 body["reasoning"] = {"effort": self.reasoning_effort}
         else:
             url = self.base_url + "/chat/completions" if self.base_url.endswith("/v1") \
                 else self.base_url + "/v1/chat/completions"
             headers["authorization"] = "Bearer " + (self.api_key or "")
-            body = {"model": self.model, "max_tokens": self.max_tokens,
-                    "messages": [{"role": "system", "content": system}] + self._to_openai(messages),
-                    "tools": [{"type": "function", "function": t} for t in tools],
-                    "tool_choice": "auto"}
+            body = {"model": self.model, "max_tokens": max_tokens,
+                    "messages": [{"role": "system", "content": system}] + self._to_openai(messages)}
+            if tools:
+                body["tools"] = [{"type": "function", "function": t} for t in tools]
+                body["tool_choice"] = "auto" if tool_choice is None else tool_choice
             if self.reasoning_effort:
                 body["reasoning_effort"] = self.reasoning_effort
 
@@ -214,6 +219,7 @@ class ModelClient:
 
     def _normalise(self, data):
         if self.mode == "anthropic":
+            finish_reason = data.get("stop_reason")
             blocks = data.get("content") or []
             text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
             calls = [{"id": b["id"], "name": b["name"], "arguments": b.get("input") or {}}
@@ -228,6 +234,7 @@ class ModelClient:
             if data.get("status") == "failed":
                 error = data.get("error") or {}
                 raise RuntimeError(f"Responses API failed: {error.get('code') or 'unknown error'}")
+            finish_reason = (data.get("incomplete_details") or {}).get("reason") or data.get("status")
             items = data.get("output") or []
             text = "".join(part.get("text", "") for item in items if item.get("type") == "message"
                            for part in item.get("content") or [] if part.get("type") == "output_text")
@@ -245,7 +252,9 @@ class ModelClient:
                      "output_tokens": u.get("output_tokens", 0) or 0,
                      "cache_read_tokens": (u.get("input_tokens_details") or {}).get("cached_tokens", 0) or 0}
         else:
-            ch = (data.get("choices") or [{}])[0].get("message") or {}
+            choice = (data.get("choices") or [{}])[0]
+            finish_reason = choice.get("finish_reason")
+            ch = choice.get("message") or {}
             text = ch.get("content") or ""
             calls = []
             for tc in ch.get("tool_calls") or []:
@@ -262,7 +271,7 @@ class ModelClient:
                      "cache_read_tokens": (u.get("prompt_tokens_details") or {}).get("cached_tokens", 0)}
         for k in self.usage:
             self.usage[k] += usage.get(k, 0)
-        result = {"content": text, "tool_calls": calls, "usage": usage}
+        result = {"content": text, "tool_calls": calls, "usage": usage, "finish_reason": finish_reason}
         if self.mode == "anthropic":
             result["anthropic_content"] = blocks
         elif self.mode == "responses":
