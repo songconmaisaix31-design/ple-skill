@@ -6,8 +6,26 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
+
+
+def carries_source_excerpt(record):
+    if record.get("event") != "request" or record.get("call", 0) < 2:
+        return False
+    messages = record.get("body", {}).get("messages", [])
+    # The harness appends its first-action observation immediately after the
+    # task. A wrap-up reminder can follow it in the same outbound request.
+    if (len(messages) < 3 or [msg.get("role") for msg in messages[:3]] != ["system", "user", "user"]):
+        return False
+    observation = messages[2].get("content")
+    prefix = ("The first Python program did not run cleanly. Inspect any outputs and use the normal tools."
+              "\n\nSandbox diagnostics, for debugging only:\n")
+    return (isinstance(observation, str) and observation.startswith(prefix)
+            and re.search(r"\n\nFirst program source near traceback line [1-9][0-9]*:\n"
+                          r"(?:[1-9][0-9]*: [^\n]*(?:\n|$)){1,5}\Z", observation) is not None)
+
 
 raw, destination = map(Path, sys.argv[1:3])
 arm, position, first, phase, status = sys.argv[3:]
@@ -50,7 +68,9 @@ if log.exists():
 grade = (report or {}).get("grade")
 checkpoint = (report or {}).get("checkpoint") or {}
 run_sha = os.environ["GITHUB_SHA"]
-protocol_path = "docs/experiments/paired-storage-v1/protocol.json"
+repair_trial = variant in ("f", "g")
+experiment = "repair-source-v1" if repair_trial else "paired-storage-v1"
+protocol_path = f"docs/experiments/{experiment}/protocol.json"
 payload = subprocess.check_output(["git", "show", f"{run_sha}:{protocol_path}"])
 split = json.loads(payload)["split"]
 preregistered = split["cases"][variant]
@@ -58,12 +78,17 @@ input_matches = (variant in split["holdout"] and preregistered["split"] == "hold
                  and checksums == preregistered["sha256"])
 archive = (report or {}).get("model_io_archive") or {}
 io_complete = False
+source_exposed = None
 io_file = destination / "model-io.jsonl"
 if io_file.is_file() and archive.get("complete") is True and not io_redacted:
-    lines = io_file.read_text(encoding="utf-8").splitlines()
-    if lines:
-        end = json.loads(lines[-1])
-        io_complete = end == {"event": "end", **archive}
+    try:
+        lines = io_file.read_text(encoding="utf-8").splitlines()
+        io_complete = bool(lines) and json.loads(lines[-1]) == {"event": "end", **archive}
+        if repair_trial and io_complete:
+            records = [json.loads(line) for line in lines[:-1]]
+            source_exposed = any(carries_source_excerpt(record) for record in records)
+    except (ValueError, TypeError, AttributeError):
+        io_complete = False
 observation = (phase == "experiment" and status in (0, 1)
                and not secret_in_case and input_matches
                and report is not None and not report.get("infrastructure_error")
@@ -81,6 +106,8 @@ metadata = {"variant": variant, "mode": arm, "repeat": int(os.environ["REPEAT"])
             "protocol_sha256": hashlib.sha256(payload).hexdigest(),
             "input_sha256": checksums, "protocol_input_sha256": preregistered["sha256"],
             "input_matches_protocol": input_matches, "model_io_archive_complete": io_complete}
+if repair_trial:
+    metadata["repair_context_exposed"] = source_exposed
 (destination / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 if report is not None:
     (destination / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -104,6 +131,8 @@ label = "measured" if observation else "infrastructure failure"
 summary = f"- {variant}/{metadata['repeat']} arm {position} ({arm}): {label}, exit {status}"
 if isinstance(grade, dict) and "optimal" in grade:
     summary += f", optimal={grade['optimal']}"
+if repair_trial:
+    summary += f", repair source exposed={source_exposed}"
 with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as stream:
     stream.write(summary + "\n")
 sys.exit(0 if observation else 1)

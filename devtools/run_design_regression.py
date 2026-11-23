@@ -247,8 +247,11 @@ def first_code_action(lines):
     return None
 
 
+ARCHIVE_VARIANTS = ("d", "e", "f", "g")
+
+
 class ModelIOArchive:
-    """Host-side transcript for the two explicitly opted-in, original CPU fixtures."""
+    """Host-side transcript for explicitly opted-in, original CPU fixtures."""
 
     def __init__(self, path, limit=2 * 1024 * 1024):
         self.path = path
@@ -394,9 +397,9 @@ async def measure(workspace, variant, seconds, kit_root, check_transport=False, 
 
     archive = None
     if archive_path is not None:
-        if (check_transport or variant not in ("d", "e")
+        if (check_transport or variant not in ARCHIVE_VARIANTS
                 or archive_path.resolve().is_relative_to(workspace.resolve())):
-            raise ValueError("model IO must be archived outside a synthetic D/E task workspace")
+            raise ValueError("model IO must be archived outside a synthetic D/E/F/G task workspace")
         archive = ModelIOArchive(archive_path)
     if check_transport:
         workspace.mkdir()
@@ -514,15 +517,15 @@ def main():
                         help="Capture and grade at this external cutoff, then stop the session")
     parser.add_argument("--keep-dir", type=Path, help="New directory for the original inputs and two outputs")
     parser.add_argument("--archive-model-io", type=Path, metavar="JSONL",
-                        help="Save model prompts and generated code for original D/E local CPU trials")
+                        help="Save model prompts and generated code for original D/E/F/G local CPU trials")
     args = parser.parse_args()
     if not 1 <= args.timeout_sec <= 21600:
         parser.error("time budget must be between 1 and 21600 seconds")
     if args.archive_model_io is not None:
         endpoint = urlsplit(os.environ.get("MODEL_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or "")
-        if (args.check_transport or args.variant not in ("d", "e") or os.environ.get("MODEL_NAME") != "gemma-4-26b"
+        if (args.check_transport or args.variant not in ARCHIVE_VARIANTS or os.environ.get("MODEL_NAME") != "gemma-4-26b"
                 or endpoint.hostname not in ("127.0.0.1", "localhost", "::1")):
-            parser.error("--archive-model-io is available only for original D/E trials on the local Gemma CPU endpoint")
+            parser.error("--archive-model-io is available only for original D/E/F/G trials on the local Gemma CPU endpoint")
         if args.archive_model_io.exists() or not args.archive_model_io.parent.is_dir():
             parser.error("--archive-model-io needs a new file in an existing host directory")
     if args.checkpoint_only_sec is not None and (args.check_transport or not 0 < args.checkpoint_only_sec < args.timeout_sec):

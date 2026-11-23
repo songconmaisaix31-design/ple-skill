@@ -20,6 +20,8 @@ FINISH_REASONS = {"stop", "tool_calls", "length", "content_filter", "stop_sequen
                   "tool_use", "max_tokens", "completed", "incomplete", "max_output_tokens", "refusal"}
 INCOMPLETE_REASONS = {"length", "max_tokens", "incomplete", "max_output_tokens"}
 PYTHON_TOOL = next(tool for tool in TOOLS if tool["name"] == "run_python")
+TRACEBACK_FRAME = re.compile(r'^  File "([^"\n]+)", line ([1-9][0-9]{0,6})(?:, in [^\n]+)?$', re.MULTILINE)
+SOURCE_EXCERPT_LIMIT = 800
 
 OBJECTIVE = """Write one short Python program for the stated data task. Use the Python standard
 library. Read the original named input files from the task workspace. Follow the requested method,
@@ -79,6 +81,35 @@ def program_from(response, mode):
                else not isinstance(node, ast.Pass) for node in tree.body):
         return None, "non_program"
     return source, "valid"
+
+
+def repair_source_excerpt(program, diagnostics):
+    """Locate a line in this submitted program using the final traceback only."""
+    header = "Traceback (most recent call last):\n"
+    _, found, trace = ("\n" + diagnostics).rpartition("\n" + header)
+    trace = trace.rstrip("\n")
+    if not found or not trace.startswith('  File '):
+        return ""
+    # Ignore free-form output and outer call sites when the inner frame belongs
+    # to the task's libraries or to some other dynamically constructed program.
+    frames = list(TRACEBACK_FRAME.finditer(trace))
+    if (not frames or frames[-1][1] != "<run_python>"
+            or "\n  File " in trace[frames[-1].end():]):
+        return ""
+    if not re.fullmatch(r"[A-Za-z_][\w.]*(?::.*)?", trace.rsplit("\n", 1)[-1]):
+        return ""
+    line_number = int(frames[-1][2])
+    lines = program.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    if line_number > len(lines):
+        return ""
+    indices = range(max(1, line_number - 2), min(len(lines), line_number + 2) + 1)
+    title = f"\n\nFirst program source near traceback line {line_number}:\n"
+    width = (SOURCE_EXCERPT_LIMIT - len(title) + 1) // len(indices) - 1
+    excerpt = []
+    for index in indices:
+        row = f"{index}: {lines[index - 1]}"
+        excerpt.append(row if len(row) <= width else row[:width - 1] + "…")
+    return title + "\n".join(excerpt)
 
 
 async def first_action(harness, mode, messages, on_usage, on_log, work_deadline, clock):
@@ -158,6 +189,9 @@ async def first_action(harness, mode, messages, on_usage, on_log, work_deadline,
             observation = "The first Python program did not run cleanly. Inspect any outputs and use the normal tools."
             if detail := execution.get("detail"):
                 observation += "\n\nSandbox diagnostics, for debugging only:\n" + detail
+                if (event["classification"] == "exec_failed" and type(exit_code) is int and exit_code != 0
+                        and os.environ.get("PLE_REPAIR_CONTEXT") == "source"):
+                    observation += repair_source_excerpt(program, detail)
             return observation
 
         try:

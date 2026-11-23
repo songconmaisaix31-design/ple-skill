@@ -21,9 +21,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: ${{ fromJSON(github.event.head_commit.message == 'Replicate the first Python action with a fixed seed' && '["d","e"]' || startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') && '["a","b","c"]' || github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' && '["a","b"]' || '["a"]') }}
-        strategy: ${{ fromJSON(github.event.head_commit.message == 'Replicate the first Python action with a fixed seed' && '["paired"]' || startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') && '["legacy","native","text"]' || '["legacy"]') }}
-        repeat: ${{ fromJSON(github.event.head_commit.message == 'Replicate the first Python action with a fixed seed' && '[1,2,3]' || '[1]') }}
+        variant: ${{ fromJSON(github.event.head_commit.message == 'Test source context in a fixed-seed repair ablation' && '["f","g"]' || github.event.head_commit.message == 'Replicate the first Python action with a fixed seed' && '["d","e"]' || startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') && '["a","b","c"]' || github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' && '["a","b"]' || '["a"]') }}
+        strategy: ${{ fromJSON((github.event.head_commit.message == 'Replicate the first Python action with a fixed seed' || github.event.head_commit.message == 'Test source context in a fixed-seed repair ablation') && '["paired"]' || startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') && '["legacy","native","text"]' || '["legacy"]') }}
+        repeat: ${{ fromJSON((github.event.head_commit.message == 'Replicate the first Python action with a fixed seed' || github.event.head_commit.message == 'Test source context in a fixed-seed repair ablation') && '[1,2,3]' || '[1]') }}
     env:
       DESIGN_BENCH: ${{ github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' || startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') }}
       VERIFY_MCP: ${{ startsWith(github.event.head_commit.message, 'Check PLE tool transport on the cloud CPU') }}
@@ -149,6 +149,8 @@ jobs:
           case "$VARIANT:$REPEAT" in
             d:1|e:2|d:3) arms=(legacy text) ;;
             e:1|d:2|e:3) arms=(text legacy) ;;
+            f:1|g:2|f:3) arms=(text text-source) ;;
+            g:1|f:2|g:3) arms=(text-source text) ;;
             *) echo 'Unexpected replication pair.' >&2; exit 1 ;;
           esac
 
@@ -173,6 +175,12 @@ jobs:
           position=0
           for arm in "${arms[@]}"; do
             position=$((position + 1))
+            action_mode="$arm"
+            unset PLE_REPAIR_CONTEXT
+            if [[ "$arm" == text-source ]]; then
+              action_mode=text
+              export PLE_REPAIR_CONTEXT=source
+            fi
             raw="$private/$arm"
             evidence="$public/$arm"
             mkdir -p "$raw" "$evidence"
@@ -189,7 +197,7 @@ jobs:
                   if "$python" -m devtools.cloud_model_probe > "$raw/probe.log" 2>&1; then
                     phase=experiment
                     status=0
-                    PLE_CODE_ACTION="$arm" "$python" devtools/run_design_regression.py \
+                    PLE_CODE_ACTION="$action_mode" "$python" devtools/run_design_regression.py \
                       --kit-root "$kit" --variant "$VARIANT" --timeout-sec 720 --checkpoint-only-sec 395 \
                       --keep-dir "$raw/case" --archive-model-io "$raw/model-io.jsonl" \
                       > "$raw/experiment.log" 2>&1 || status=$?
