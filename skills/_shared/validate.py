@@ -10,7 +10,7 @@ Usage:
 
 Exit 0 = pass, 1 = hard fail, 2 = warn only.
 """
-import argparse, json, os, sys, zipfile, csv, io
+import argparse, json, os, posixpath, sys, zipfile, csv, io
 from xml.etree import ElementTree as ET
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -30,15 +30,15 @@ def warn(msg): WARN.append(msg); print("  WARN  " + msg)
 
 def check_docx(path, label):
     try:
-        z = zipfile.ZipFile(path)
-        root = ET.fromstring(z.read("word/document.xml"))
+        with zipfile.ZipFile(path) as archive:
+            root = ET.fromstring(archive.read("word/document.xml"))
     except Exception as e:
         return fail(f"{label}: docx 打不开 ({e})")
-    paras = [p for p in root.iter() if p.tag.split("}")[-1] == "p"]
-    if len(paras) < 5:
-        fail(f"{label}: docx 只有 {len(paras)} 个段落，疑似空文档")
-    else:
-        ok(f"{label}: docx {len(paras)} 段可解析")
+    for node in root.iter():
+        tag = node.tag.rsplit("}", 1)[-1]
+        if (tag == "t" and (node.text or "").strip()) or tag in {"drawing", "pict", "object", "sym"}:
+            return ok(f"{label}: docx 正文可解析")
+    fail(f"{label}: docx 文档正文为空")
 
 
 def check_xlsx(path, label):
@@ -63,6 +63,13 @@ def csv_header(raw):
         return []
 
 
+def archive_hits(names, target, exact=False):
+    target = posixpath.normpath(target)
+    return [name for name in names
+            if not name.endswith("/") and ".." not in name.split("/")
+            and (name == target or (not exact and name.endswith("/" + target)))]
+
+
 def check_zip(path, label, spec):
     try:
         z = zipfile.ZipFile(path)
@@ -72,20 +79,38 @@ def check_zip(path, label, spec):
     if not names:
         return fail(f"{label}: zip 是空的")
     ok(f"{label}: zip {len(names)} 项")
+    exact = spec.get("zip_exact_paths", False)
     for req in spec.get("zip_required", []):
-        hits = [n for n in names if n.endswith(req)]
+        hits = archive_hits(names, req, exact)
         if not hits:
             fail(f"{label}: 缺必需文件 {req}")
         else:
             ok(f"{label}: 含 {req}")
+            if exact and req.lower().endswith(".json"):
+                try:
+                    with io.TextIOWrapper(z.open(hits[0]), encoding="utf-8-sig") as source:
+                        check_json_stream(source, f"{label}!{req}")
+                except (OSError, ValueError, zipfile.BadZipFile) as exc:
+                    fail(f"{label}!{req}: JSON 不可读 ({exc})")
     for req in spec.get("zip_soft", []):
-        hits = [n for n in names if n.endswith(req)]
+        hits = archive_hits(names, req, exact)
         if not hits:
             warn(f"{label}: 未见 {req}（二级件，题面若未硬性要求可忽略）")
         else:
             ok(f"{label}: 含 {req}")
+    exact_headers = spec.get("zip_csv_rules") or {}
+    for name, rule in exact_headers.items():
+        hits = archive_hits(names, name, exact)
+        if hits:
+            try:
+                with io.TextIOWrapper(z.open(hits[0]), encoding="utf-8-sig", newline="") as source:
+                    check_csv_stream(source, f"{label}!{name}", rule["columns"], rule["exact"])
+            except (OSError, ValueError, zipfile.BadZipFile) as exc:
+                fail(f"{label}!{name}: CSV 不可读 ({exc})")
     for name, cols in (spec.get("csv_headers") or {}).items():
-        hit = [n for n in names if n.endswith(name)]
+        if name in exact_headers:
+            continue
+        hit = archive_hits(names, name, exact)
         if not hit:
             fail(f"{label}: 缺 CSV {name}")
             continue
@@ -99,12 +124,101 @@ def check_zip(path, label, spec):
         low = name.lower()
         if spec.get("deep", True) and low.endswith((".docx", ".xlsx")) and not low.startswith("__macosx"):
             try:
-                tmp = "/tmp/_v_" + os.path.basename(name)
-                open(tmp, "wb").write(z.read(name))
-                (check_docx if low.endswith(".docx") else check_xlsx)(tmp, f"{label}!{name}")
-                os.remove(tmp)
+                payload = io.BytesIO(z.read(name))
+                (check_docx if low.endswith(".docx") else check_xlsx)(payload, f"{label}!{name}")
             except Exception as e:
                 warn(f"{label}!{name}: 嵌套检查跳过 ({e})")
+    z.close()
+
+
+def invalid_json_constant(token):
+    raise ValueError(f"invalid JSON constant {token}")
+
+
+def check_json(path, label):
+    try:
+        with open(path, encoding="utf-8-sig") as source:
+            check_json_stream(source, label)
+    except OSError as exc:
+        fail(f"{label}: JSON 不可读 ({exc})")
+
+
+def check_json_stream(source, label):
+    try:
+        json.load(source, parse_constant=invalid_json_constant)
+    except (ValueError, OSError, RecursionError) as exc:
+        fail(f"{label}: JSON 解析失败 ({exc})")
+    else:
+        ok(f"{label}: JSON 可解析")
+
+
+def check_csv(path, label, columns, exact):
+    try:
+        with open(path, encoding="utf-8-sig", newline="") as source:
+            check_csv_stream(source, label, columns, exact)
+    except OSError as exc:
+        fail(f"{label}: CSV 不可读 ({exc})")
+
+
+def check_csv_stream(source, label, columns, exact):
+    try:
+        actual = next(csv.reader(source, strict=True))
+    except (csv.Error, OSError, ValueError, StopIteration) as exc:
+        fail(f"{label}: CSV 列头不可读 ({exc})")
+        return
+    if exact and actual != columns:
+        fail(f"{label}: CSV 列头不符，要求 {columns}，实际 {actual}")
+    elif (missing := [name for name in columns if name not in actual]):
+        fail(f"{label}: CSV 缺列 {missing}")
+    else:
+        ok(f"{label}: CSV 列头匹配")
+
+
+def declared_path(base, name):
+    if not name or "\\" in name or "\x00" in name or ".." in name.split("/"):
+        fail(f"交付路径无效：{name}")
+        return None
+    if os.path.isabs(name):
+        return name
+    path = os.path.join(base, name)
+    if os.path.commonpath((os.path.realpath(base), os.path.realpath(path))) != os.path.realpath(base):
+        fail(f"交付路径超出工作目录：{name}")
+        return None
+    return path
+
+
+def check_file(path, label, spec, columns=None, exact=True):
+    if not os.path.isfile(path):
+        return fail(f"交付文件不存在：{label}")
+    if os.path.getsize(path) == 0:
+        return fail(f"交付文件是 0 字节：{label}")
+    ext = posixpath.splitext(label)[1].lower()
+    if ext == ".zip":
+        check_zip(path, label, spec)
+    elif ext == ".docx":
+        check_docx(path, label)
+    elif ext == ".xlsx":
+        check_xlsx(path, label)
+    elif ext == ".json":
+        check_json(path, label)
+    elif ext == ".csv" and columns:
+        check_csv(path, label, columns, exact)
+    else:
+        ok(f"{label}: 文件存在")
+
+
+def check_directory(path, label, inspect_children=True):
+    if not os.path.isdir(path):
+        return fail(f"交付目录不存在：{label}")
+    files = sorted(f for f in os.listdir(path) if not f.startswith("."))
+    if not files:
+        return fail("交付目录是空的")
+    ok(f"目录 {len(files)} 项：{', '.join(files[:8])}")
+    if inspect_children:
+        for name in files[:20]:
+            file = os.path.join(path, name)
+            if os.path.isfile(file) and name.lower().endswith((".docx", ".xlsx")):
+                check_file(file, name, {})
 
 
 def main():
@@ -119,50 +233,23 @@ def main():
     if not deliv:
         print("FAIL: 没有指定交付物"); return 1
 
-    path = deliv if os.path.isabs(deliv) else os.path.join(a.base, deliv)
-    print(f"[deliverable] {path}")
-    if not os.path.exists(path):
-        fail(f"交付物不存在：{deliv}")
-        print(f"\nRESULT: FAIL ({len(FAIL)} hard)")
-        return 1
-    size = os.path.getsize(path)
-    if size == 0:
-        fail("交付物是 0 字节")
-    else:
-        ok(f"大小 {size} bytes")
-
-    low = deliv.lower()
-    if low.endswith("/") or os.path.isdir(path):
-        files = sorted(f for f in os.listdir(path) if not f.startswith("."))
-        if not files:
-            fail("交付目录是空的")
-        else:
-            ok(f"目录 {len(files)} 项：{', '.join(files[:8])}")
-            for f in files[:20]:
-                p2 = os.path.join(path, f)
-                if f.lower().endswith(".docx") and os.path.isfile(p2):
-                    check_docx(p2, f"dir/{f}")
-                elif f.lower().endswith(".xlsx") and os.path.isfile(p2):
-                    check_xlsx(p2, f"dir/{f}")
-        print(f"\nRESULT: {'FAIL' if FAIL else ('WARN' if WARN else 'PASS')} "
-              f"({len(FAIL)} hard / {len(WARN)} soft)")
-        return 1 if FAIL else (2 if WARN else 0)
-    if low.endswith(".zip"):
-        check_zip(path, "zip", spec)
-    elif low.endswith(".docx"):
-        check_docx(path, "docx")
-    elif low.endswith(".xlsx"):
-        check_xlsx(path, "xlsx")
-    elif low.endswith(".json"):
-        try:
-            with open(path, encoding="utf-8-sig") as source:
-                json.load(source)
-        except (ValueError, OSError) as exc:
-            fail(f"JSON 解析失败：{exc}")
-        else:
-            ok("JSON 可解析")
-    else:
-        ok("非容器格式，只做存在性检查")
+    required = spec.get("required_files") or []
+    headers = spec.get("required_csv_headers") or {}
+    unordered = spec.get("required_csv_columns") or {}
+    path = declared_path(a.base, deliv)
+    if path is not None:
+        print(f"[deliverable] {path}")
+        is_directory = deliv.endswith("/") or (not required and os.path.isdir(path))
+        if is_directory:
+            check_directory(path, deliv, inspect_children=not required)
+        for name in required or ([] if is_directory else [deliv]):
+            file = declared_path(a.base, name)
+            if file is None:
+                continue
+            if is_directory and os.path.commonpath((os.path.realpath(path), os.path.realpath(file))) != os.path.realpath(path):
+                fail(f"交付文件超出声明的目录：{name}")
+                continue
+            check_file(file, name, spec, headers.get(name) or unordered.get(name), exact=name in headers)
 
     print(f"\nRESULT: {'FAIL' if FAIL else ('WARN' if WARN else 'PASS')} ({len(FAIL)} hard / {len(WARN)} soft)")
     return 1 if FAIL else (2 if WARN else 0)

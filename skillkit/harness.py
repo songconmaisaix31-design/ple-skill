@@ -18,8 +18,10 @@ from .model import MCP_OUTPUT_TOOLS, PYTHON_SOURCE_MAX, PYTHON_TIMEOUT_DEFAULT, 
 from .transport import quote_path
 
 MAX_STEPS = 240
-HARD_BUDGET = 0.94      # fraction of agent_timeout_sec we allow ourselves
+WORK_BUDGET = 0.94      # leave time for a final structural check
 WRAP_BUDGET = 0.80      # switch to "close it out" mode
+FINAL_BUDGET = 0.98     # leave time for the WebSocket done frame
+CHECKPOINT_TIMEOUT = 10
 
 NAMED_TEXT_INPUT = re.compile(
     r"(?<![\w./-])(?:\./)?(inputs?/(?:[\w-]+/)*[\w.-]+\.(?:json|csv|txt))"
@@ -66,6 +68,9 @@ def _fmt_contract(spec):
     lines.append("deliverable path: " + (d or "(not stated in the instruction - read task.md, "
                                           "look for a house template, then state your choice)"))
     lines.append(f"delivery mode: {spec.get('mode')}")
+    required_files = spec.get("required_files") or []
+    if len(required_files) > 1:
+        lines.append("required output paths: " + ", ".join(required_files))
     if spec.get("zip_required"):
         lines.append("required members: " + ", ".join(spec["zip_required"]))
     for name, cols in (spec.get("csv_headers") or {}).items():
@@ -98,6 +103,11 @@ class Harness:
         self._since_guard = 99
         self._periodic_alerts = 0
         self._finish_refusals = 0
+        self._guard_result = None
+        self._verified_once = False
+        self._checkpoint_due = False
+        self._first_exec_check = False
+        self._mutation_interrupted = False
         self._ctx = router.load_context(self.route["domain"])
         self._mcp_outputs = named_output_paths(instruction, self.workdir) if self.mcp else set()
         self._mcp_copy = exact_copy_contract(instruction, self.workdir, self.mcp, self._mcp_outputs)
@@ -168,6 +178,48 @@ class Harness:
         return out
 
     # ---------- tools ----------
+    def _invalidate_checkpoint(self):
+        self._guard_result = None
+        self.final = ""
+
+    async def _mutate(self, action, *args):
+        self._invalidate_checkpoint()
+        try:
+            return await action(*args)
+        except asyncio.CancelledError:
+            self._mutation_interrupted = True
+            raise
+
+    def _record_write(self, path):
+        self._since_guard = 0
+        deliverable = self.spec.get("deliverable")
+        if not deliverable or self._verified_once:
+            return
+        target = posixpath.normpath(posixpath.join(self.workdir, deliverable))
+        written = posixpath.normpath(posixpath.join(self.workdir, path))
+        if written == target or (deliverable.endswith("/") and written.startswith(target + "/")):
+            self._checkpoint_due = True
+
+    async def _check_deliverable(self):
+        self._checkpoint_due = False
+        if self._guard_result is None:
+            copy_error = await self._check_mcp_copy()
+            status, report = await self.guard.run()
+            if copy_error:
+                status, report = "FAIL", copy_error + "\n" + report
+            self._guard_result = status, report
+            path = self.spec.get("deliverable")
+            if status in {"PASS", "WARN"}:
+                self._verified_once = True
+                self.final = f"Deliverable: {path}\nStructural checks: {status}."
+                if status == "WARN":
+                    self.final += "\n" + report[-800:]
+            elif status == "SKIP":
+                self.final = "No deliverable path was verified."
+            else:
+                self.final = f"Deliverable: {path}\nStructural checks: {status}.\n" + report[-800:]
+        return self._guard_result
+
     async def _capture_mcp_copy(self, arguments, response, status, content_type, truncated):
         method, url = arguments.get("method", "POST"), arguments.get("url", "")
         if not isinstance(method, str) or method.upper() != "POST":
@@ -201,12 +253,13 @@ class Harness:
             if self._mcp_copy_value is not None and self._mcp_copy_value != data:
                 self._mcp_copy_value = None
                 self._mcp_copy_ambiguous = True
+                self._invalidate_checkpoint()
                 return "MCP returned conflicting values. Automatic copy disabled. Resolve which result the task requires."
             self._mcp_copy_value = data
-        result = await self.t.write_file(path, data)
+        result = await self._mutate(self.t.write_file, path, data)
         if not result.get("ok"):
             return f"MCP exact copy could not be saved to {path}."
-        self._since_guard = min(self._since_guard, 0)
+        self._record_write(path)
         return f"Saved the MCP tool result verbatim to {path}."
 
     async def _check_mcp_copy(self):
@@ -217,7 +270,7 @@ class Harness:
         _, _, path = self._mcp_copy
         if await self.t.read_file(path) == self._mcp_copy_value:
             return ""
-        await self.t.write_file(path, self._mcp_copy_value)
+        await self._mutate(self.t.write_file, path, self._mcp_copy_value)
         if await self.t.read_file(path) == self._mcp_copy_value:
             return ""
         return f"Could not verify the exact tool result in {path}."
@@ -240,10 +293,10 @@ class Harness:
                 return "[run_python] no file saved: stdout is not valid JSON"
 
         data = output.encode()
-        result = await self.t.write_file(path, data)
+        result = await self._mutate(self.t.write_file, path, data)
         if not result.get("ok"):
             return f"[run_python] write failed: {result.get('error', 'unknown error')}"
-        self._since_guard = min(self._since_guard, 0)
+        self._record_write(path)
         sample = output[:512]
         if len(output) > len(sample):
             sample += "\n[stdout sample truncated]"
@@ -276,9 +329,11 @@ class Harness:
                 command = f"{quote_path(self.t.python_cmd)} -c {quote_path(program)}"
             else:
                 command, timeout = a.get("command", ""), a.get("timeout_sec", 120)
-            r = await self.t.exec(command, timeout)
+            r = await self._mutate(self.t.exec, command, timeout)
             if output_path is not None:
                 return await self._save_python_output(output_path, r)
+            if r.get("ok") and self.spec.get("deliverable") and not self._verified_once and not self._first_exec_check:
+                self._checkpoint_due = self._first_exec_check = True
             body = (r.get("output") or "")[:14000]
             tag = "" if r.get("ok") else f"[exit {r.get('exit_code')}] "
             return f"{tag}{body}"
@@ -302,10 +357,10 @@ class Harness:
                 target = posixpath.normpath(posixpath.join(self.workdir, path))
                 if target == self._mcp_copy[2] and (blob != self._mcp_copy_value or a.get("append")):
                     return "The file is managed by the exact MCP copy. Call finish without rewriting it."
-            r = await self.t.write_file(path, blob, a.get("append", False))
-            self._since_guard = min(self._since_guard, 0)
+            r = await self._mutate(self.t.write_file, path, blob, a.get("append", False))
             if r.get("ok") is False:
                 return "[write_file] failed: " + str(r.get("error"))
+            self._record_write(path)
             return f"[write_file] ok {r.get('size', len(blob))} bytes -> {a.get('path')}"
         if name == "mcp_call":
             hdrs = {"content-type": "application/json",
@@ -319,7 +374,7 @@ class Harness:
             hdrs.update({key.lower(): value for key, value in supplied_headers.items()})
             body = a.get("body") or ""
             method, url = a.get("method", "POST"), a.get("url", "")
-            r = await self.t.http(method, url, hdrs, body.encode())
+            r = await self._mutate(self.t.http, method, url, hdrs, body.encode())
             if r.get("ok") is False and r.get("status") is None:
                 return f"[mcp_call] relay failed: {r.get('error') or 'no HTTP response'}"
 
@@ -364,17 +419,32 @@ class Harness:
     async def run(self, timeout_sec=21600, on_usage=None, on_log=None):
         on_log = on_log or self.log
         clock = asyncio.get_running_loop().time
-        deadline = None if timeout_sec is None else clock() + timeout_sec * HARD_BUDGET
-        wrap_at = None if deadline is None else deadline - timeout_sec * (HARD_BUDGET - WRAP_BUDGET)
-        budget = asyncio.timeout_at(deadline)
+        start = clock()
+        final_deadline = None if timeout_sec is None else start + FINAL_BUDGET * timeout_sec
+        work_deadline = wrap_at = None
+        if final_deadline is not None:
+            reserve = min(CHECKPOINT_TIMEOUT, timeout_sec * 0.15)
+            work_deadline = min(start + WORK_BUDGET * timeout_sec, final_deadline - reserve)
+            wrap_at = start + WRAP_BUDGET * timeout_sec
+        budget = asyncio.timeout_at(work_deadline)
         try:
             async with budget:
                 return await self._run(on_usage, on_log, wrap_at, clock)
         except TimeoutError:
             if not budget.expired():
                 raise
-            on_log("hard deadline hit")
-            return self.final or "The harness reached its time budget. Review the files already written."
+            if self._mutation_interrupted:
+                on_log("work deadline interrupted a task operation")
+                return ("The task reached its time budget during a write-capable task operation. "
+                        "Deliverable state was not verified.")
+            on_log("work deadline hit; checking final deliverable")
+            try:
+                async with asyncio.timeout_at(final_deadline):
+                    await self._check_deliverable()
+            except TimeoutError:
+                pass
+            return "The task reached its time budget.\n" + (
+                self.final or "The deliverable could not be verified before the deadline.")
 
     async def _run(self, on_usage, on_log, wrap_at, clock):
         snapshot = await self._snapshot()
@@ -468,21 +538,24 @@ class Harness:
                 self._since_guard += 1
             else:
                 self._since_guard = 0
-            if self._since_guard == 2 and finish_result is None:
-                status, rep = await self.guard.run()
-                on_log(f"guard: {status}")
+            periodic = self._since_guard == 2
+            if (self._checkpoint_due or periodic) and finish_result is None:
                 self._since_guard = 99
-                if status in ("FAIL", "ERROR") and self._periodic_alerts < 2:
-                    self._periodic_alerts += 1
-                    messages.append({"role": "user",
-                                     "content": "GUARD FAILED for the contract path. Fix these "
-                                                "before anything else:\n" + rep})
+                try:
+                    async with asyncio.timeout(CHECKPOINT_TIMEOUT):
+                        status, rep = await self._check_deliverable()
+                except TimeoutError:
+                    on_log("deliverable checkpoint exceeded its time limit")
+                else:
+                    on_log(f"guard: {status}")
+                    if periodic and status in ("FAIL", "ERROR") and self._periodic_alerts < 2:
+                        self._periodic_alerts += 1
+                        messages.append({"role": "user",
+                                         "content": "GUARD FAILED for the contract path. Fix these "
+                                                    "before anything else:\n" + rep})
 
             if finish_result is not None:
-                copy_error = await self._check_mcp_copy()
-                status, rep = await self.guard.run()
-                if copy_error:
-                    status, rep = "FAIL", copy_error + "\n" + rep
+                status, rep = await self._check_deliverable()
                 on_log(f"guard at finish: {status}")
                 if status in ("FAIL", "ERROR"):
                     self._finish_refusals += 1
@@ -497,14 +570,8 @@ class Harness:
                     on_log("guard refused three times; shipping with a stated discrepancy")
                     summary = ("CONTRACT DISCREPANCY - the parser-inferred path could not be "
                                "satisfied:\n" + rep[-900:] + "\n\n" + summary)
-                self.final = summary
-                break
+                self.final = summary or self.final
+                return self.final
 
-        if not self.final:
-            copy_error = await self._check_mcp_copy()
-            status, rep = await self.guard.run()
-            if copy_error:
-                status, rep = "FAIL", copy_error + "\n" + rep
-            self.final = ("Deliverable: " + str(self.spec.get("deliverable")) +
-                          f"\nGuard at exit: {status}\n" + rep[-1200:])
+        await self._check_deliverable()
         return self.final
