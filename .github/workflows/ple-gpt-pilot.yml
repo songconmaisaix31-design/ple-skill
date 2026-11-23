@@ -60,30 +60,47 @@ jobs:
           "$test_env/bin/python" devtools/workbook_regression.py
           "$test_env/bin/python" devtools/code_action_regression.py
 
-      - name: Replay the frozen paired experiment from archived files
+      - name: Replay both frozen storage experiments from archived files
         shell: bash
         run: |
           unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
-          records=docs/experiments/paired-storage-v1
-          python3 devtools/verify_paired_storage_evidence.py \
-            --archive "$records/evidence.zip" --protocol "$records/protocol.json" \
-            --expected-sha 52dc6b2f683dc5295529843530fe2ee4ea6e1c71 \
-            --csv "$RUNNER_TEMP/ple-trials.csv" --details "$RUNNER_TEMP/ple-code-coverage.json"
-          python3 devtools/paired_storage_report.py "$RUNNER_TEMP/ple-trials.csv" --output "$RUNNER_TEMP/ple-summary.json"
-          python3 - "$records" "$RUNNER_TEMP" <<'PY'
+          replay_experiment() {
+            local records="docs/experiments/$1" revision="$2" replay="$RUNNER_TEMP/$1"
+            mkdir -p "$replay"
+            python3 devtools/verify_paired_storage_evidence.py \
+              --archive "$records/evidence.zip" --protocol "$records/protocol.json" \
+              --expected-sha "$revision" --csv "$replay/trials.csv" --details "$replay/code-coverage.json"
+            python3 devtools/paired_storage_report.py "$replay/trials.csv" \
+              --protocol "$records/protocol.json" --output "$replay/summary.json"
+            python3 - "$records" "$replay" <<'PY'
           import csv
           import json
           import sys
           from pathlib import Path
 
           saved, replay = map(Path, sys.argv[1:])
-          with (saved / "trials.csv").open(newline="") as a, (replay / "ple-trials.csv").open(newline="") as b:
-              if list(csv.DictReader(a)) != list(csv.DictReader(b)):
-                  raise SystemExit("Replayed trial records differ from the archived table")
-          for name in ("summary", "code-coverage"):
-              if json.loads((saved / f"{name}.json").read_bytes()) != json.loads((replay / f"ple-{name}.json").read_bytes()):
-                  raise SystemExit(f"Replayed {name} differs from the archived record")
+          with (saved / "trials.csv").open(newline="") as a, (replay / "trials.csv").open(newline="") as b:
+              archived, rebuilt = csv.DictReader(a), csv.DictReader(b)
+              if archived.fieldnames != rebuilt.fieldnames or list(archived) != list(rebuilt):
+                  raise SystemExit(f"{saved.name}/trials.csv differs from the replay")
+          for name in ("summary.json", "code-coverage.json"):
+              if json.loads((saved / name).read_bytes()) != json.loads((replay / name).read_bytes()):
+                  raise SystemExit(f"{saved.name}/{name} differs from the replay")
           PY
+          }
+          records=docs/experiments/repair-source-v1
+          python3 devtools/rebuild_repair_source_evidence.py \
+            --first "$records/attempts/attempt-1-evidence.zip" --retry "$records/attempts/attempt-2-evidence.zip" \
+            --protocol "$records/protocol.json" --output "$RUNNER_TEMP/rebuilt-repair-source.zip"
+          python3 - "$records/evidence.zip" "$RUNNER_TEMP/rebuilt-repair-source.zip" <<'PYCODE'
+          import sys
+          from zipfile import ZipFile
+          with ZipFile(sys.argv[1]) as saved, ZipFile(sys.argv[2]) as rebuilt:
+              if saved.namelist() != rebuilt.namelist() or any(saved.read(n) != rebuilt.read(n) for n in saved.namelist()):
+                  raise SystemExit("F/G evidence differs from the selected whole-pair attempts")
+          PYCODE
+          replay_experiment paired-storage-v1 52dc6b2f683dc5295529843530fe2ee4ea6e1c71
+          replay_experiment repair-source-v1 9c1a00a40c8e40212ea1e97c93824366889ddb8e
 
       - name: Exchange the authorized runner identity for a temporary Hugging Face token
         if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' }}

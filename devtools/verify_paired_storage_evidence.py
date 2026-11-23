@@ -1,4 +1,4 @@
-"""Replay the fixed-seed D/E experiment from its evidence ZIP, without running model code."""
+"""Replay a fixed-seed storage experiment from its evidence ZIP, without running model code."""
 import argparse
 import ast
 from collections import Counter
@@ -66,7 +66,72 @@ def program_detail(source, call, interface):
             "parseable": valid}
 
 
-def transcript(data, summary, arm, recorder_complete):
+REPAIR_FIELDS = ("repair_requested", "source_feedback_observed", "source_line", "completed_files")
+SOURCE_TITLE = re.compile(r"\n\nFirst program source near traceback line (\d+):\n")
+ERROR_MESSAGE = "The first Python program did not run cleanly. Inspect any outputs and use the normal tools."
+DIAGNOSTICS = ERROR_MESSAGE + "\n\nSandbox diagnostics, for debugging only:\n"
+TRACEBACK_HEADER = "\nTraceback (most recent call last):\n"
+TRACEBACK_FRAME = re.compile(r'^  File "([^"\n]+)", line ([1-9][0-9]{0,6})(?:, in [^\n]+)?$', re.M)
+
+
+def repair_exposure(requests, responses, complete, arm, event):
+    # Inspect what was actually sent in a subsequent request, even when its
+    # inference was interrupted. Never infer exposure from the assigned arm.
+    unknown = None if not complete else 0
+    fields = {"repair_requested": unknown, "source_feedback_observed": unknown, "source_line": None}
+    for request_id, request in sorted(requests.items()):
+        messages = request["body"].get("messages") or []
+        if (request_id < 2 or len(messages) < 3 or
+                [m.get("role") for m in messages[:3]] != ["system", "user", "user"]):
+            continue
+        observation = messages[2].get("content")
+        if not isinstance(observation, str) or not observation.startswith(ERROR_MESSAGE):
+            continue
+        fields["repair_requested"] = 1
+        marker = SOURCE_TITLE.search(observation)
+        if not marker:
+            fields["source_feedback_observed"] = 0
+            return fields
+        require(arm == "text-source", "baseline received an added source excerpt")
+        require(observation.startswith(DIAGNOSTICS), "source feedback lacks sandbox diagnostics")
+        if not event and not complete:
+            return fields
+        require(event.get("mode") == "text" and event.get("classification") == "exec_failed" and type(event.get("exec_exit_status")) is int
+                and event["exec_exit_status"] != 0, "source feedback lacks a matching failed execution")
+        number = int(marker[1])
+        diagnostics = observation[len(DIAGNOSTICS):marker.start()]
+        _, found, traceback = ("\n" + diagnostics).rpartition(TRACEBACK_HEADER)
+        traceback = traceback.rstrip("\n")
+        frames = list(TRACEBACK_FRAME.finditer(traceback))
+        require(found and traceback.startswith("  File ") and frames and
+                frames[-1].groups() == ("<run_python>", str(number)) and
+                "\n  File " not in traceback[frames[-1].end():] and
+                re.fullmatch(r"[A-Za-z_][\w.]*(?::.*)?", traceback.rsplit("\n", 1)[-1]),
+                "source location disagrees with final traceback")
+        response = responses.get(1)
+        if not response and not complete:
+            return fields
+        require(response and response.get("choices"), "source excerpt has no archived first response")
+        source = response["choices"][0]["message"].get("content")
+        require(isinstance(source, str), "source excerpt has no first text program")
+        source = source.strip()
+        if fence := FENCE.fullmatch(source):
+            source = fence[1]
+        source = source.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        require(1 <= number <= len(source), "excerpt traceback line lies outside first program")
+        positions = range(max(1, number - 2), min(len(source), number + 2) + 1)
+        width = (800 - len(marker[0]) + 1) // len(positions) - 1
+        expected = []
+        for i in positions:
+            row = f"{i}: {source[i - 1]}"
+            expected.append(row if len(row) <= width else row[:width - 1] + "…")
+        require(observation[marker.end():] == "\n".join(expected), "excerpt differs from archived first program")
+        fields.update(source_feedback_observed=1, source_line=number)
+        return fields
+    return fields
+
+
+def transcript(data, summary, arm, recorder_complete, repair_event=None):
     requests, responses, statuses = {}, {}, {}
     programs = []
     end = None
@@ -96,7 +161,7 @@ def transcript(data, summary, arm, recorder_complete):
                 responses[call] = rec
                 for choice in rec["choices"]:
                     msg = choice["message"]
-                    if arm == "text" and call == 1 and isinstance(msg.get("content"), str) and msg["content"].strip():
+                    if arm in ("text", "text-source") and call == 1 and isinstance(msg.get("content"), str) and msg["content"].strip():
                         programs.append(program_detail(msg["content"], call, "text-first"))
                     for tc in msg.get("tool_calls") or []:
                         fn = tc.get("function") or {}
@@ -126,9 +191,12 @@ def transcript(data, summary, arm, recorder_complete):
                     and requests.keys() == statuses.keys() and responses.keys() <= requests.keys()
                     and all(key in responses for key, row in statuses.items()
                             if row.get("status") == "complete" and row.get("http_status") == 200))
-    return {"transcript_complete": int(complete), "requests_archived": len(requests),
+    details = {"transcript_complete": int(complete), "requests_archived": len(requests),
             "responses_archived": len(responses), "programs_recovered": len(programs),
-            "programs_parseable": sum(p["parseable"] for p in programs)}, programs
+            "programs_parseable": sum(p["parseable"] for p in programs)}
+    if repair_event is not None:
+        details.update(repair_exposure(requests, responses, complete, arm, repair_event))
+    return details, programs
 
 
 def replay(zf, prefix, case, inventory, hashes):
@@ -172,9 +240,13 @@ def verify_arm(zf, protocol, protocol_hash, case, repeat, arm):
     metadata = load_json(zf, prefix + "metadata.json")
     report = load_json(zf, prefix + "report.json")
     recorded_io = (metadata or {}).get("model_io_archive_complete", False)
+    repair = protocol["id"] == "repair-source-v1"
+    first_action = (report or {}).get("first_code_action") or {}
     details, programs = transcript(read(zf, prefix + "model-io.jsonl", 2 * 1024 * 1024 + 512),
-                                   (report or {}).get("model_io_archive"), arm, recorded_io)
+                                   (report or {}).get("model_io_archive"), arm, recorded_io, first_action if repair else None)
     row.update(details)
+    if repair and first_action:
+        require(first_action.get("mode") == "text", "expected text-first mode in both repair arms")
     if metadata is None:
         require(not any(n.startswith(prefix) and not n.endswith("/") for n in zf.namelist()),
                 "arm evidence lacks metadata")
@@ -190,6 +262,16 @@ def verify_arm(zf, protocol, protocol_hash, case, repeat, arm):
     require(metadata.get("protocol_sha256") == protocol_hash, "frozen protocol bytes disagree with recorder")
     require(metadata.get("protocol_input_sha256") == hashes, "preregistered input hashes disagree with recorder")
     require(type(metadata.get("model_io_archive_complete")) is bool, "missing transcript archive state")
+    if repair:
+        recorder_exposure = metadata.get("repair_context_exposed")
+        require("repair_context_exposed" in metadata, "missing exposure metadata")
+        if details["transcript_complete"]:
+            require(recorder_exposure is bool(details["source_feedback_observed"]),
+                    "independent source exposure disagrees with recorder")
+        elif recorder_exposure is not None:
+            require(type(recorder_exposure) is bool and details["source_feedback_observed"] is not None and
+                    recorder_exposure == bool(details["source_feedback_observed"]),
+                    "source exposure disagrees with incomplete recorder")
     actual_hashes = {}
     for name in INPUTS:
         data = read(zf, prefix + "case/" + name, 65536)
@@ -228,9 +310,13 @@ def verify_arm(zf, protocol, protocol_hash, case, repeat, arm):
     row.update(measured=1, score=verified["score"], feasible=int(verified["feasible"]),
                optimal=int(verified["optimal"]), submitted_cost_cents=verified["submitted_cost_cents"],
                evidence_status="regraded")
+    if repair:
+        folder = prefix + "case/output/"
+        row["completed_files"] = sum(folder + name in zf.namelist() and zf.getinfo(folder + name).file_size > 0
+                                     for name in OUTPUTS)
     event = report.get("first_code_action") or {}
     if event.get("classification") == "verified":
-        require(event.get("mode") == arm and type(event.get("millis")) is int and event["millis"] >= 0,
+        require(event.get("mode") == ("text" if repair else arm) and type(event.get("millis")) is int and event["millis"] >= 0,
                 "invalid first verified action")
         row["first_verified_sec"] = event["millis"] / 1000
     return row, programs
@@ -248,14 +334,16 @@ def main():
         protocol_bytes = a.protocol.read_bytes()
         protocol = json.loads(protocol_bytes)
         protocol_hash = digest(protocol_bytes)
-        require(protocol["id"] == "paired-storage-v1", "wrong experiment protocol")
+        require(protocol["id"] in ("paired-storage-v1", "repair-source-v1"), "wrong experiment protocol")
+        repair = protocol["id"] == "repair-source-v1"
+        arms = ("text", "text-source") if repair else ("legacy", "text")
         rows, programs = [], {}
         with ZipFile(a.archive) as zf:
             counts = Counter(zf.namelist())
             require(not any(n > 1 for n in counts.values()), "duplicate ZIP member")
             for case in protocol["split"]["holdout"]:
                 for repeat in protocol["design"]["repetition_ids"]:
-                    for arm in ("legacy", "text"):
+                    for arm in arms:
                         label = f"{case}/{repeat}/{arm}"
                         try:
                             row, sources = verify_arm(zf, protocol, protocol_hash, case, repeat, arm)
@@ -267,13 +355,15 @@ def main():
         require(len(revisions) <= 1 and (not a.expected_sha or
                 SHA.fullmatch(a.expected_sha) and revisions <= {a.expected_sha}), "run revision mismatch")
         with a.csv.open("w", encoding="utf-8", newline="") as out:
-            w = csv.DictWriter(out, fieldnames=FIELDS)
+            w = csv.DictWriter(out, fieldnames=FIELDS + REPAIR_FIELDS if repair else FIELDS)
             w.writeheader()
             w.writerows(rows)
         summary = {"planned": len(rows), "regraded": sum(r["measured"] for r in rows),
                    "missing_arms": sum(r["evidence_status"] == "missing_arm" for r in rows),
                    "complete_transcripts": sum(r["transcript_complete"] for r in rows),
                    "git_sha": next(iter(revisions), None)}
+        if repair:
+            summary["verified_candidate_exposures"] = sum(r.get("source_feedback_observed") == 1 for r in rows)
         if a.details:
             a.details.write_text(json.dumps({**summary, "programs": programs}, indent=2) + "\n")
         print(json.dumps(summary))
