@@ -47,6 +47,18 @@ GPT-6.1 Sol 在独立会话中只获得题面和输入，使用自行编写的�
 
 另外只读取两张输入表，使用 SciPy 1.17.0 的 HiGHS 混合整数求解器重新建模。每个时段为允许的泵量建一个二元变量，各时段恰选一个。每个前缀的累计泵量减累计需求加初始库存必须处于库存上下限，最后一期再加终态限制。目标函数为各期泵量乘费率之和。A 和 B 的可行目标值和求解器给出的下界分别同为 92 和 67 美分，两次相对最优间隙均为零。[SciPy MILP 接口](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.milp.html)
 
+新增的 C 在两个时段停泵，并要求期末库存恰好为 2。云端对照开始前，分别用动态规划、穷举和 HiGHS 核对了最低成本 35 美分。动态规划给出 16 条可行路径，其中仅 1 条最优。任务容器只接收题面和两份输入，独立评分器在容器外运行。
+
+### 首次 Python 调用对照
+
+CodeAct 将可执行的 Python 和程序运行反馈用于多步任务。Hugging Face 的 smolagents 实现了文本代码动作，mini-SWE-agent 的 v2 默认使用原生工具调用。本实验比较三种策略：沿用短提示的工具循环、首轮强制调用原生 `run_python`、首轮直接生成完整 Python。后两种使用相同的输入、生成上限和任务隔离环境，执行结果再交给原工具循环。每题每组一次，统一使用零温度、种子 17、720 秒预算和相同的评分器。[CodeAct 论文](https://proceedings.mlr.press/v235/wang24h.html) · [smolagents](https://github.com/huggingface/smolagents/blob/main/src/smolagents/agents.py) · [mini-SWE-agent](https://mini-swe-agent.com/latest/advanced/v2_migration/) · [云端对照](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45204343520)
+
+每个 runner 先用固定的两份测试文件经过正式 kit 的 WebSocket、Docker 工作区和文件导出路径，逐字节核对内容。随后新建任务容器运行模型，分别记录模型请求是否被中断、工具是否成功执行、最终目录中两个文件的类型与大小。文件通过结构检查后，评分器复算六个时段的库存、约束和成本。
+
+### Excel 输入取证
+
+旧工具读取工作簿只返回二进制长度。新工具在题目容器内使用 `openpyxl` 只读预览指定工作表和最多 96 个单元格。保留单元格坐标、公式和上次保存的缓存值。工作表声明的使用范围只作为定位提示。原创工作簿中，E7 为 12，E8 的公式为 `=E7*2`，而上次保存的值为 20。测试同时覆盖缓存为零、缺失缓存、隐藏工作表和非默认区域，检查读取前后文件哈希一致。题目镜像缺少 `openpyxl` 时，工具会说明依赖缺失。可用安装了 `openpyxl` 的 Python 运行 `python devtools/workbook_regression.py`。[Encoding Spreadsheets for Large Language Models](https://aclanthology.org/2024.emnlp-main.1154/) · [openpyxl 读取语义](https://openpyxl.readthedocs.io/en/stable/tutorial.html)
+
 ## 判读边界
 
 官方公开开发榜按 29 道题汇总，每个模型和 harness 组合运行三次。Gemma 4 26B 在所列组合中的分数为 0.007 至 0.053，GLM 5.2 配 Codex 为 0.260。公开榜的模型服务、推理设置和预算与本项目在四核 CPU 上使用的量化模型不同。正式对照要固定模型服务、模型版本、每题时间和评测器，再比较同一批题的逐题分数和产物。[开发榜](https://ple-bench.com/leaderboard?set=dev) · [官方产物规范](https://github.com/google-research/ple/blob/8320f0402fdca9f42476607f72bcfd5271cd50c9/docs/artifacts.md)
