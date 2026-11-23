@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from math import ceil, inf
 import os
+from pathlib import Path
 import threading
 import time
 from urllib.error import HTTPError
@@ -144,7 +145,20 @@ class Relay(BaseHTTPRequestHandler):
         if not isinstance(payload, dict) or payload.get("model") != MODEL or payload.get("stream"):
             self.send_json(400, b'{"error":"only non-streaming glm-5.2 is available"}')
             return
-        self.send_json(*forward(payload, self.server.inference_token))
+        try:
+            token = inference_token(self.server.inference_token, self.server.token_file)
+        except (OSError, ValueError):
+            self.send_json(503, b'{"error":"Hugging Face inference credential unavailable"}')
+            return
+        self.send_json(*forward(payload, token))
+
+
+def inference_token(token, token_file):
+    if token_file:
+        token = token_file.read_text(encoding="ascii").strip()
+    if not token or not token.isascii() or not token.isprintable() or " " in token:
+        raise ValueError("Hugging Face inference bearer is invalid or missing")
+    return token
 
 
 def main():
@@ -152,13 +166,20 @@ def main():
     if not proxy_key:
         raise SystemExit("MODEL_PROXY_KEY must not be empty")
     token = os.environ.get("PLE_HF_INFERENCE_TOKEN", "").strip()
-    if not token or not token.isascii() or not token.isprintable() or " " in token:
-        raise SystemExit("PLE_HF_INFERENCE_TOKEN must contain a valid bearer token")
-    if hmac.compare_digest(proxy_key.encode(), token.encode()):
+    path = os.environ.get("PLE_HF_INFERENCE_TOKEN_FILE")
+    token_file = Path(path) if path else None
+    if bool(token) == bool(token_file):
+        raise SystemExit("Configure exactly one Hugging Face inference credential source")
+    try:
+        initial_token = inference_token(token, token_file)
+    except (OSError, ValueError):
+        raise SystemExit("Hugging Face inference credential unavailable") from None
+    if hmac.compare_digest(proxy_key.encode(), initial_token.encode()):
         raise SystemExit("The relay and inference credentials must be separate")
     with ThreadingHTTPServer(("0.0.0.0", 4101), Relay) as server:
         server.proxy_key = proxy_key
         server.inference_token = token
+        server.token_file = token_file
         server.serve_forever()
 
 

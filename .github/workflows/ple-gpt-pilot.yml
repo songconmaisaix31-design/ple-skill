@@ -15,6 +15,9 @@ jobs:
   pilot:
     runs-on: ubuntu-24.04
     timeout-minutes: 150
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -24,6 +27,7 @@ jobs:
       - name: Validate the declared model with the official kit
         shell: bash
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
           docker version >/dev/null
           python3 -m venv "$RUNNER_TEMP/ple-bootstrap"
           "$RUNNER_TEMP/ple-bootstrap/bin/python" -m pip install --disable-pip-version-check uv
@@ -46,16 +50,51 @@ jobs:
               raise SystemExit("This repository must declare the eligible GLM-5.2 model.")
           PY
 
+      - name: Exchange the authorized runner identity for a temporary Hugging Face token
+        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' }}
+        shell: bash
+        run: |
+          umask 077
+          cat > "$RUNNER_TEMP/ple-hf-oidc-refresh" <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          umask 077
+          unset HF_TOKEN HUGGING_FACE_HUB_TOKEN HF_OIDC_ID_TOKEN OPENAI_API_KEY MODEL_PROXY_KEY
+          export HF_HOME="$RUNNER_TEMP/ple-hf-oidc-home"
+          export HF_ENDPOINT=https://huggingface.co HF_OIDC_RESOURCE=DWaaaa
+          if ! token=$(timeout 45 "$RUNNER_TEMP/ple-official/.venv/bin/hf" auth token 2>"$RUNNER_TEMP/ple-hf-oidc-error"); then
+            if grep -qiE 'invalid_grant|no matching (trusted )?publisher' "$RUNNER_TEMP/ple-hf-oidc-error"; then
+              echo 'Hugging Face rejected the runner identity (invalid_grant).'
+            else
+              echo 'The Hugging Face CLI could not exchange this runner identity.'
+            fi
+            exit 1
+          fi
+          [[ "$token" =~ ^hf_[A-Za-z0-9._-]+$ ]]
+          printf '::add-mask::%s\n' "$token"
+          printf '%s\n' "$token" > "$RUNNER_TEMP/ple-hf-oidc-token.new"
+          mv "$RUNNER_TEMP/ple-hf-oidc-token.new" "$RUNNER_TEMP/ple-hf-oidc-token"
+          BASH
+          chmod 700 "$RUNNER_TEMP/ple-hf-oidc-refresh"
+          if "$RUNNER_TEMP/ple-hf-oidc-refresh"; then
+            echo 'Temporary Hugging Face runner identity authorized.'
+          else
+            echo 'Hugging Face runner identity unavailable. Existing secrets or device login remain available.'
+          fi
+
       - name: Select and verify the configured cloud model
         id: model_selection
         if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' }}
         shell: bash
         env:
           PLE_OPENAI_API_KEY: ${{ secrets.PLE_OPENAI_API_KEY }}
-          PLE_HF_INFERENCE_TOKEN: ${{ secrets.PLE_HF_INFERENCE_TOKEN || secrets.PLE_HF_TOKEN }}
+          PLE_HF_INFERENCE_TOKEN: ${{ secrets.PLE_HF_INFERENCE_TOKEN }}
+          PLE_HF_LEGACY_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
           python="$RUNNER_TEMP/ple-official/.venv/bin/python"
           if [[ -n "$PLE_OPENAI_API_KEY" ]] && \
+             env -u PLE_OPENAI_API_KEY -u PLE_HF_INFERENCE_TOKEN -u PLE_HF_LEGACY_TOKEN \
              MODEL_API=openai/gpt-6.1-sol MODEL_NAME=gpt-6.1-sol \
              MODEL_BASE_URL=https://api.openai.com/v1 MODEL_API_KEY="$PLE_OPENAI_API_KEY" \
              "$python" -m devtools.cloud_model_probe; then
@@ -64,9 +103,16 @@ jobs:
             exit 0
           fi
 
-          if [[ -z "$PLE_HF_INFERENCE_TOKEN" ]]; then
-            echo 'Pilot waiting for a usable OpenAI API key or Hugging Face inference token.' | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
+          oidc_file="$RUNNER_TEMP/ple-hf-oidc-token"
+          uses_oidc=false
+          if [[ -z "$PLE_HF_INFERENCE_TOKEN" && -s "$oidc_file" ]]; then
+            export PLE_HF_INFERENCE_TOKEN_FILE="$oidc_file"
+            uses_oidc=true
+          elif [[ -z "$PLE_HF_INFERENCE_TOKEN" && -n "$PLE_HF_LEGACY_TOKEN" ]]; then
+            export PLE_HF_INFERENCE_TOKEN="$PLE_HF_LEGACY_TOKEN"
+          elif [[ -z "$PLE_HF_INFERENCE_TOKEN" ]]; then
+            echo 'Pilot blocked before inference: no usable OpenAI key, Hugging Face runner identity, or Hugging Face inference token.' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
 
           umask 077
@@ -75,14 +121,16 @@ jobs:
           export MODEL_PROXY_KEY
           printf '::add-mask::%s\n' "$MODEL_PROXY_KEY"
           printf 'MODEL_PROXY_URL=%s\nMODEL_PROXY_KEY=%s\n' "$MODEL_PROXY_URL" "$MODEL_PROXY_KEY" >> "$GITHUB_ENV"
-          env -u PLE_OPENAI_API_KEY nohup python3 devtools/gpt_cloud_relay.py \
+          env -u PLE_OPENAI_API_KEY -u PLE_HF_LEGACY_TOKEN nohup python3 devtools/gpt_cloud_relay.py \
             </dev/null >"$RUNNER_TEMP/ple-relay.log" 2>&1 &
           curl --max-time 5 --fail --silent --retry 8 --retry-connrefused --retry-delay 1 "$MODEL_PROXY_URL/ready" >/dev/null
+          unset PLE_OPENAI_API_KEY PLE_HF_INFERENCE_TOKEN PLE_HF_INFERENCE_TOKEN_FILE PLE_HF_LEGACY_TOKEN
           MODEL_API=google-cloud/glm-5.2 MODEL_NAME=glm-5.2 \
             MODEL_BASE_URL="$MODEL_PROXY_URL/v1" MODEL_API_KEY="$MODEL_PROXY_KEY" \
             "$python" -m devtools.cloud_model_probe
           echo 'model_api=google-cloud/glm-5.2' >> "$GITHUB_OUTPUT"
           echo 'ready=true' >> "$GITHUB_OUTPUT"
+          printf 'uses_oidc=%s\n' "$uses_oidc" >> "$GITHUB_OUTPUT"
 
       - name: Validate the selected evaluation entry
         if: steps.model_selection.outputs.ready == 'true'
@@ -90,6 +138,7 @@ jobs:
         env:
           PLE_MODEL_API: ${{ steps.model_selection.outputs.model_api }}
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
           entry="$GITHUB_WORKSPACE"
           case "$PLE_MODEL_API" in
             openai/gpt-6.1-sol)
@@ -114,7 +163,8 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
         run: |
-          if [[ -n "$HF_TOKEN" ]]; then exit 0; fi
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          if [[ -n "$HF_TOKEN" || -s "$RUNNER_TEMP/ple-hf-oidc-token" ]]; then exit 0; fi
           umask 077
           export HF_HOME="$RUNNER_TEMP/ple-hf-home"
           printf 'HF_HOME=%s\n' "$HF_HOME" >> "$GITHUB_ENV"
@@ -156,30 +206,41 @@ jobs:
             exit 1
           fi
 
-      - name: Verify access to the official PLE dataset
+      - name: Verify and download the official checks-only task
         id: dataset_access
         if: steps.model_selection.outputs.ready == 'true'
         shell: bash
         env:
           HF_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
           HF_HUB_DISABLE_TELEMETRY: '1'
+          HF_HUB_DISABLE_PROGRESS_BARS: '1'
         run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          if [[ -z "$HF_TOKEN" && -s "$RUNNER_TEMP/ple-hf-oidc-token" ]]; then
+            export HF_TOKEN
+            HF_TOKEN=$(cat "$RUNNER_TEMP/ple-hf-oidc-token")
+          fi
           if [[ -z "$HF_TOKEN" && ( -z "${HF_HOME:-}" || ! -s "$HF_HOME/token" ) ]]; then
             echo 'Official dev task not run. Awaiting Hugging Face dataset access.' | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
           cd "$RUNNER_TEMP/ple-official"
-          uv run python - <<'PY'
+          task_dir="$RUNNER_TEMP/ple-official-task"
+          uv run python - "$task_dir" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
           import time
 
-          from huggingface_hub import HfApi
+          from huggingface_hub import HfApi, snapshot_download
           from huggingface_hub.errors import HfHubHTTPError
 
           api = HfApi()
+          repo = "google/physical-engineerings-last-exam"
           for attempt in range(21):
               try:
-                  api.auth_check("google/physical-engineerings-last-exam", repo_type="dataset")
+                  api.auth_check(repo, repo_type="dataset")
               except HfHubHTTPError as exc:
                   status = getattr(exc.response, "status_code", None)
                   if status != 403 or attempt == 20:
@@ -192,27 +253,56 @@ jobs:
               else:
                   break
           print("Hugging Face dataset access verified.")
+          try:
+              revision = api.dataset_info(repo, revision="main").sha or ""
+              if not re.fullmatch(r"[a-f0-9]{40}", revision):
+                  raise RuntimeError("Invalid dataset revision")
+              snapshot_download(repo, repo_type="dataset", revision=revision,
+                                allow_patterns=["tasks/wind-diaphragm-shear/**"], local_dir=sys.argv[1])
+          except HfHubHTTPError as exc:
+              status = getattr(exc.response, "status_code", None)
+              raise SystemExit(f"Official task download failed (HTTP {status}).") from None
+          except Exception:
+              raise SystemExit("Official task download failed.") from None
+          if not (Path(sys.argv[1]) / "tasks/wind-diaphragm-shear/task.toml").is_file():
+              raise SystemExit("Official task download was incomplete.")
+          print(f"Downloaded the official task at dataset revision {revision[:12]}.")
           PY
+          unset HF_TOKEN
+          printf 'PLE_TASKS_DIR=%s\n' "$task_dir/tasks" >> "$GITHUB_ENV"
           echo 'ready=true' >> "$GITHUB_OUTPUT"
 
       - name: Run and score one official checks-only task
         if: steps.dataset_access.outputs.ready == 'true'
         shell: bash
         env:
-          HF_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
           OPENAI_API_KEY: ${{ steps.model_selection.outputs.model_api == 'openai/gpt-6.1-sol' && secrets.PLE_OPENAI_API_KEY || '' }}
           HF_HUB_DISABLE_TELEMETRY: '1'
+          PLE_REFRESH_HF_OIDC: ${{ steps.model_selection.outputs.uses_oidc == 'true' }}
         run: |
+          if [[ "$PLE_REFRESH_HF_OIDC" == true ]]; then
+            (
+              while sleep 2400; do
+                until "$RUNNER_TEMP/ple-hf-oidc-refresh"; do
+                  echo 'Temporary Hugging Face credential renewal failed; retrying shortly.'
+                  sleep 60
+                done
+              done
+            ) &
+            renewal_pid=$!
+            trap 'kill "$renewal_pid" 2>/dev/null || true' EXIT
+          fi
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN HF_HOME HF_TOKEN
           cd "$RUNNER_TEMP/ple-official"
           export UV_TOOL_BIN_DIR="$RUNNER_TEMP/ple-bin"
           mkdir -p "$UV_TOOL_BIN_DIR"
           export PATH="$UV_TOOL_BIN_DIR:$PATH"
-          env -u HF_TOKEN uv tool install harbor==0.20.0 --with websockets
+          env -u OPENAI_API_KEY -u MODEL_PROXY_KEY uv tool install harbor==0.20.0 --with websockets
           out="$RUNNER_TEMP/ple-pilot"
           log="$RUNNER_TEMP/ple-pilot.log"
           status=0
           uv run python eval/run.py "$PLE_EVAL_ENTRY" --tasks wind-diaphragm-shear \
-            --trials 1 --attempts 1 --no-export --out "$out" >"$log" 2>&1 || status=$?
+            --tasks-dir "$PLE_TASKS_DIR" --trials 1 --attempts 1 --no-export --out "$out" >"$log" 2>&1 || status=$?
 
           python3 - "$out/results.json" "$log" "$status" "$PLE_EVAL_MODEL_API" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
           import json
