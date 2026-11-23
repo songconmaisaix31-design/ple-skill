@@ -31,7 +31,8 @@ raw, destination = map(Path, sys.argv[1:3])
 arm, position, first_arm, phase, status = sys.argv[3:]
 status = int(status)
 variant = os.environ["VARIANT"]
-controlled_trial = variant in ("h", "i")
+controlled_trial = variant in ("h", "i", "j", "k")
+patch_trial = variant in ("j", "k")
 key = os.environ["MODEL_PROXY_KEY"].encode()
 inputs = ("case/task.md", "case/input/site.json", "case/input/periods.csv")
 outputs = ("case/output/schedule.csv", "case/output/summary.json")
@@ -70,7 +71,8 @@ grade = (report or {}).get("grade")
 checkpoint = (report or {}).get("checkpoint") or {}
 run_sha = os.environ["GITHUB_SHA"]
 repair_trial = variant in ("f", "g") or controlled_trial
-experiment = ("controlled-repair-replay-v1" if controlled_trial else
+experiment = ("constrained-patch-v1" if patch_trial else
+              "controlled-repair-replay-v1" if controlled_trial else
               "repair-source-v1" if repair_trial else "paired-storage-v1")
 protocol_path = f"docs/experiments/{experiment}/protocol.json"
 payload = subprocess.check_output(["git", "show", f"{run_sha}:{protocol_path}"])
@@ -88,6 +90,8 @@ repair_requested = None
 controlled_source_valid = None
 release_sec = repair_dispatch_sec = None
 timing_valid = None
+patch_interface_used = None
+patch_events = []
 io_file = destination / "model-io.jsonl"
 if io_file.is_file() and archive.get("complete") is True and not io_redacted:
     try:
@@ -117,6 +121,13 @@ if io_file.is_file() and archive.get("complete") is True and not io_redacted:
                                 and type(repair_dispatch_sec) in (int, float)
                                 and abs(release_sec - 250) <= 2
                                 and release_sec <= repair_dispatch_sec <= release_sec + 5)
+                if patch_trial:
+                    marker = "Repair action contract: reply with exactly one compact JSON object"
+                    patch_interface_used = any(
+                        marker in str(record.get("body", {}).get("messages", [{}])[0].get("content", ""))
+                        for record in repair)
+                    patch_events = [record for record in records
+                                    if record.get("event") == "patch_application"]
     except (ValueError, TypeError, AttributeError):
         io_complete = False
 observation = (phase == "experiment" and status in (0, 1)
@@ -130,7 +141,13 @@ if controlled_trial:
     observation = (observation and controlled_source_valid is True and timing_valid is True
                    and repair_requested is True and action.get("classification") == "exec_failed"
                    and action.get("exec_exit_status") == 1
-                   and source_exposed == (arm == "text-source"))
+                   and source_exposed is True)
+    if patch_trial:
+        expected_first = protocol["design"]["first_arm"][variant][str(os.environ["REPEAT"])]
+        observation = (observation and first_arm == expected_first
+                       and patch_interface_used == (arm == "patch-source")
+                       and (arm != "patch-source" or repair_requested is True)
+                       and (arm == "patch-source" or not patch_events))
 cpus = int(subprocess.check_output(["nproc"], text=True).strip())
 cpu = next((line.split(":", 1)[1].strip() for line in Path("/proc/cpuinfo").read_text().splitlines()
             if line.startswith("model name") and ":" in line), "unknown")
@@ -148,6 +165,9 @@ if controlled_trial:
     metadata.update(controlled_first_program_valid=controlled_source_valid,
                     controlled_release_sec=release_sec, repair_dispatch_sec=repair_dispatch_sec,
                     controlled_timing_valid=timing_valid)
+if patch_trial:
+    metadata.update(patch_interface_used=patch_interface_used,
+                    patch_application_events=patch_events)
 (destination / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 if report is not None:
     (destination / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -173,6 +193,8 @@ if isinstance(grade, dict) and "optimal" in grade:
     summary += f", optimal={grade['optimal']}"
 if repair_trial:
     summary += f", repair source exposed={source_exposed}"
+if patch_trial:
+    summary += f", patch interface used={patch_interface_used}, patch events={len(patch_events)}"
 with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as stream:
     stream.write(summary + "\n")
 sys.exit(0 if observation else 1)

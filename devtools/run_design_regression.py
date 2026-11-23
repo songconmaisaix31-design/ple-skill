@@ -2,6 +2,7 @@
 """Run the original scheduling exercise through the harness and the official WebSocket relay."""
 
 import argparse
+import ast
 import asyncio
 import base64
 from collections import deque
@@ -252,13 +253,47 @@ def first_code_action(lines):
     return None
 
 
-ARCHIVE_VARIANTS = ("d", "e", "f", "g", "h", "i")
-CONTROLLED_VARIANTS = ("h", "i")
+ARCHIVE_VARIANTS = ("d", "e", "f", "g", "h", "i", "j", "k")
+CONTROLLED_VARIANTS = ("h", "i", "j", "k")
+PATCH_VARIANTS = ("j", "k")
 CONTROLLED_RELEASE_SEC = 250
 CONTROLLED_ARCHIVE_SHA256 = "511905b2bc72f17b92abf364eade2e2cfd2b060b86419796197f37968b5204e7"
 CONTROLLED_SOURCE_SHA256 = "eba7247453712a78c991e152dd1e4bf08d80474429601e25ec7ae6fd6fbb7381"
 CONTROLLED_PROGRAM_SHA256 = "f4ece9d6d7e41e93f364db640b51b50c12c947ce1639fd2af991007dd76364f2"
 PYTHON_FENCE = re.compile(r"```python\n(.*?)\n```", re.DOTALL)
+PATCH_CONTRACT = """
+
+Repair action contract: reply with exactly one compact JSON object and no Markdown or explanation:
+{"line":81,"replacement":"<one Python source line without leading indentation>"}
+The host preserves the existing indentation, applies only that line, parses the complete program,
+and runs it. Do not return the full program. The replacement must be at most 160 characters.
+""".rstrip()
+
+
+def apply_constrained_patch(source, raw):
+    """Validate one exact JSON line replacement and return host-transformed source plus evidence."""
+    event = {"accepted": False, "line": None, "replacement": None,
+             "raw_content_sha256": (hashlib.sha256(raw.encode()).hexdigest()
+                                     if isinstance(raw, str) else None)}
+    try:
+        patch = json.loads(raw)
+        if (not isinstance(patch, dict) or set(patch) != {"line", "replacement"}
+                or patch["line"] != 81 or not isinstance(patch["replacement"], str)
+                or patch["replacement"] != patch["replacement"].strip()
+                or not patch["replacement"] or len(patch["replacement"]) > 160
+                or "\n" in patch["replacement"] or "\r" in patch["replacement"]):
+            raise ValueError("invalid constrained patch")
+        lines = source.splitlines()
+        original = lines[patch["line"] - 1]
+        indent = original[:len(original) - len(original.lstrip())]
+        lines[patch["line"] - 1] = indent + patch["replacement"]
+        repaired = "\n".join(lines)
+        ast.parse(repaired)
+        event.update(accepted=True, line=patch["line"], replacement=patch["replacement"],
+                     patched_source_sha256=hashlib.sha256(repaired.encode()).hexdigest())
+        return repaired, event
+    except (ValueError, TypeError, KeyError, IndexError, SyntaxError):
+        return None, event
 
 
 def controlled_program():
@@ -459,6 +494,26 @@ class ControlledFirstModel:
                 "finish_reason": "stop"}
 
 
+class ControlledPatchModel(ControlledFirstModel):
+    """After the common failed program, request and guard one local line patch."""
+
+    async def chat(self, messages, system, tools=None, **kwargs):
+        if not self.used:
+            return await super().chat(messages, system, tools=tools, **kwargs)
+        result = await self.live.chat(
+            messages, system + PATCH_CONTRACT, tools=tools,
+            **{**kwargs, "max_tokens": 96},
+        )
+        raw = result.get("content")
+        repaired, event = apply_constrained_patch(self.source, raw)
+        event["end_sec"] = round(self.elapsed(), 3)
+        if repaired is not None:
+            result = {**result, "content": f"```python\n{repaired}\n```"}
+        self.archive.write({"event": "patch_application", "call": self.archive.requests, **event})
+        self.first_events["patch_application"] = event
+        return result
+
+
 @asynccontextmanager
 async def task_container(inputs, fixture_paths):
     name = "ple-design-" + uuid.uuid4().hex
@@ -484,7 +539,7 @@ async def task_container(inputs, fixture_paths):
 
 
 async def measure(workspace, variant, seconds, kit_root, check_transport=False, checkpoint_sec=None,
-                  archive_path=None, controlled_first=False):
+                  archive_path=None, controlled_first=False, controlled_patch=False):
     sys.path.insert(0, str(kit_root))
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import websockets
@@ -532,7 +587,8 @@ async def measure(workspace, variant, seconds, kit_root, check_transport=False, 
                     model_attempts, first_events, lambda: time.monotonic() - started, archive))
                 if controlled_first:
                     from skillkit.model import from_env as configured_model
-                    wrapper = ControlledFirstModel(
+                    wrapper_class = ControlledPatchModel if controlled_patch else ControlledFirstModel
+                    wrapper = wrapper_class(
                         configured_model(), controlled_program(),
                         lambda: time.monotonic() - started, archive, model_attempts, first_events)
                     stack.enter_context(patch("serve.from_env", return_value=wrapper))
@@ -624,7 +680,9 @@ def main():
     parser.add_argument("--archive-model-io", type=Path, metavar="JSONL",
                         help="Save model prompts and generated code for allowlisted local CPU trials")
     parser.add_argument("--controlled-first-program", action="store_true",
-                        help="Use the frozen failed first program for the preregistered H/I diagnostic")
+                        help="Use the frozen failed first program for a controlled repair diagnostic")
+    parser.add_argument("--controlled-patch-repair", action="store_true",
+                        help="Request and guard a one-line JSON patch after the controlled failure")
     args = parser.parse_args()
     if not 1 <= args.timeout_sec <= 21600:
         parser.error("time budget must be between 1 and 21600 seconds")
@@ -638,9 +696,11 @@ def main():
     if args.checkpoint_only_sec is not None and (args.check_transport or not 0 < args.checkpoint_only_sec < args.timeout_sec):
         parser.error("--checkpoint-only-sec needs a full model run and must be shorter than --timeout-sec")
     if args.controlled_first_program != (args.variant in CONTROLLED_VARIANTS):
-        parser.error("--controlled-first-program is required exactly for H/I")
+        parser.error("--controlled-first-program is required exactly for H/I/J/K")
     if args.controlled_first_program and (args.archive_model_io is None or args.checkpoint_only_sec != 395):
-        parser.error("H/I controlled replay requires model IO archival and the frozen 395-second cutoff")
+        parser.error("controlled repair replay requires model IO archival and the frozen 395-second cutoff")
+    if args.controlled_patch_repair and args.variant not in PATCH_VARIANTS:
+        parser.error("--controlled-patch-repair is available only for J/K")
     kit = args.kit_root.resolve()
     if not (kit / "kit" / "relay.py").is_file():
         parser.error("the kit checkout must contain kit/relay.py")
@@ -654,11 +714,11 @@ def main():
             parser.error("--keep-dir must not exist")
         return asyncio.run(measure(workspace, args.variant, args.timeout_sec, kit,
                                    args.check_transport, args.checkpoint_only_sec, args.archive_model_io,
-                                   args.controlled_first_program))
+                                   args.controlled_first_program, args.controlled_patch_repair))
     with tempfile.TemporaryDirectory(prefix="ple-design-") as temporary:
         return asyncio.run(measure(Path(temporary) / "task", args.variant, args.timeout_sec, kit,
                                    args.check_transport, args.checkpoint_only_sec, args.archive_model_io,
-                                   args.controlled_first_program))
+                                   args.controlled_first_program, args.controlled_patch_repair))
 
 
 if __name__ == "__main__":

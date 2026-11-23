@@ -1,0 +1,75 @@
+{
+  "id": "constrained-patch-v1",
+  "created_Asia_Shanghai": "2026-11-24",
+  "question": "When both arms see the same failed source and traceback, can a guarded one-line patch interface produce a better independently scored file by t=395 s than a full-program rewrite?",
+  "source": {
+    "archive": "docs/experiments/paired-storage-v1/evidence.zip",
+    "archive_sha256": "511905b2bc72f17b92abf364eade2e2cfd2b060b86419796197f37968b5204e7",
+    "member": "d/1/text/model-io.jsonl",
+    "call": 1,
+    "source_sha256": "eba7247453712a78c991e152dd1e4bf08d80474429601e25ec7ae6fd6fbb7381",
+    "transformation": "Strip all Python COMMENT tokens in both arms, preserving AST and line numbers.",
+    "controlled_source_sha256": "f4ece9d6d7e41e93f364db640b51b50c12c947ce1639fd2af991007dd76364f2",
+    "failure": "Both arms execute the same program and receive the same trusted five-line excerpt around <run_python> line 81. The expression at line 81 raises TypeError before any deliverable is written."
+  },
+  "timing": {
+    "start": "t=0 starts each fresh 720-second session after equal server warm-up. The scripted common first reply completes at t=250 s; live inference begins only after the resulting execution failure.",
+    "release_s": 250,
+    "primary_cutoff_s": 395,
+    "nominal_task_budget_s": 720,
+    "dispatch_validity": "Release must be within 2 s of t=250 and the first repair request must start no later than 5 s after release. Score the actual frozen files once at t=395."
+  },
+  "split": {
+    "development": ["a", "b", "c", "d", "e", "f", "g", "h", "i"],
+    "new_diagnostic_inputs": ["j", "k"],
+    "training": [],
+    "unit": "Two unseen input sets reproduce one fixed real-model defect. This estimates conditional recovery only, not natural end-to-end PLE score."
+  },
+  "design": {
+    "baseline": "text-source: receive the common failure, traceback and identical five-line source excerpt; request a complete replacement program with the existing 1600-token first-action policy.",
+    "candidate": "patch-source: receive the identical failure and excerpt; every live repair call must return exactly one compact JSON object with keys line and replacement. The host accepts only line 81, one nonempty stripped line of at most 160 characters, preserves existing indentation, parses the complete transformed program, and otherwise rejects without applying it. Candidate live calls use max_tokens=96.",
+    "single_changed_module": "The repair action interface and its matching response cap. Task, inputs, prompt content before the appended interface contract, failure, source exposure, model, sampling, time, execution, host scorer and file cutoff are shared.",
+    "model": "google-cloud/gemma-4-26b through the pinned local Gemma 4 26B A4B GGUF runner",
+    "sampling": {"temperature": 0, "seed": 17},
+    "shared_state": "Fresh workspaces and independent model-server processes on the same hosted CPU for each paired arm. Never provide the host positive control, reference costs, correct replacement, output files or this protocol to the model.",
+    "first_arm": {
+      "j": {"1": "text-source", "2": "patch-source", "3": "text-source"},
+      "k": {"1": "patch-source", "2": "text-source", "3": "patch-source"}
+    },
+    "evaluation": "Primary outcome is normalized independent file score at t=395 and paired difference candidate minus baseline. Report all 12 raw arm scores, J/K mean differences, each repeat's cross-case macro difference, grand paired mean and n-1 sample variance across the three repeat macro differences. Also report live response completion, patch parse/application/execute success and first accepted-patch latency.",
+    "decision": "Require six complete pairs, identical valid source exposure in all 12 arms, candidate passage through the registered patch interface in all six candidate arms, and no out-of-contract host change. Continue only if all three repeat-level macro paired differences are strictly positive and each of J and K has nonnegative mean paired difference. Stop the module if coverage is complete but the gate fails. If infrastructure, timing, archive or exposure is invalid, report insufficient evidence and rerun only the failed entire pair, preserving the first valid pair.",
+    "attempts": "Archive every attempt and reason. Never rerun a valid low score. Analysis uses the first complete valid pair in time order."
+  },
+  "cases": {
+    "j": {
+      "site": [6, 1, 12, 5, 7, [0, 2, 5, 7]],
+      "periods": [[1, 3, 5, 11], [2, 5, 7, 2], [3, 2, 2, 9], [4, 4, 5, 4], [5, 1, 2, 13], [6, 4, 7, 1]],
+      "input_sha256": {
+        "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475",
+        "input/site.json": "e5a37e521e53e2dea25a06b46f264f5b1348909de610aaf3a83ef91dbcabb720",
+        "input/periods.csv": "42b0aa8aba6b3abd44ee91c9042fa19f71701e718c452e57a3020095131f092f"
+      },
+      "offline_optimal_cost_cents": 41
+    },
+    "k": {
+      "site": [5, 2, 13, 6, 8, [1, 3, 6, 8]],
+      "periods": [[1, 4, 6, 6], [2, 2, 3, 14], [3, 6, 8, 3], [4, 3, 3, 10], [5, 5, 8, 2], [6, 2, 6, 7]],
+      "input_sha256": {
+        "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475",
+        "input/site.json": "8054c5a55f514f99d57697297a38dc576a7fc16e5e0035009a30526604740c74",
+        "input/periods.csv": "c0fcac4742e4568bd1b94738ab7b4f52536b1e43feee983c4439f6ec94c6a4dd"
+      },
+      "offline_optimal_cost_cents": 101
+    }
+  },
+  "guard_controls": {
+    "positive": "The host-only known line-81 replacement must parse, execute and score 1 on J and K.",
+    "negative": ["wrong line", "Markdown wrapper", "extra JSON key", "multiline replacement", "syntax-invalid replacement"],
+    "archive": "Preserve the raw model response before transformation, the patch decision event, transformed full program when accepted, task files, cutoff deliverables and independent score."
+  },
+  "inherits": {
+    "model_and_scoring_settings": "docs/experiments/repair-source-v1/protocol.json",
+    "controlled_source_settings": "docs/experiments/controlled-repair-replay-v1/protocol.json",
+    "implementation_lock": "The runner, host guard, recorder, workflow, inputs and protocol are committed before inference. Record immutable experiment SHA, run ID and job IDs. Run the transport check plus positive and negative controls before model startup."
+  }
+}
