@@ -27,6 +27,12 @@ FILE_LIST = re.compile(
     rf"\b(?:(?:required\s+(?:output\s+)?(?:files|deliverables)|output\s+files)|"
     rf"(?:{OUTPUT_ACTION}[^:\n]{{0,120}}\b(?:files|deliverables)\b[^:\n]{{0,100}}))"
     r"[ \t]*:[ \t]*(?:\*\*)?([^\n]*)", re.I | re.M)
+FILE_BULLETS = re.compile(
+    rf"{OUTPUT_ACTION}[^.!?\n]{{0,90}}\b(?:files|deliverables)\b[^.!?\n]{{0,90}}"
+    rf"\b(?:under|in|into|to)\s+(?:{DIRECTORY_PATH}[`\"]?|`output`)\s*\.\s*"
+    r"(?=(?:[-*+]\s+|\d+[.)]\s+))", re.I)
+ZIP_MEMBER_LIST = re.compile(r"\brequired\s+(?:archive\s+)?(?:members?|entries)\b[^:\n]{0,100}:[ \t]*([^\n]*)",
+                            re.I)
 OPTIONAL = re.compile(r"\b(?:optional(?:ly)?|for example|if (?:needed|desired|applicable)|"
                       r"may|can|do not|don't)\b", re.I)
 OPTIONAL_SUFFIX = re.compile(r"\s*(?:\(optional\)|if (?:needed|desired|applicable)|(?:or|and/or)\s+)", re.I)
@@ -37,6 +43,9 @@ HEADER_DECLARATION = re.compile(
     re.I)
 FLEXIBLE_HEADER = re.compile(r"\b(?:in any order|(?:additional|extra)\s+[\w -]*\bcolumns?\b"
                              r"[^.!?\n]{0,50}\b(?:allowed|permitted))\b", re.I)
+EXACT_HEADER = re.compile(r"\b(?:exactly|exact\s+(?:headers?|columns?|order)|"
+                          r"in (?:this |the |the given )?order|no (?:additional|extra) columns)\b", re.I)
+NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7}
 
 
 def _clean_path(raw):
@@ -65,7 +74,7 @@ def _explicit_directory(text):
         if "output" in match[1].lower() and _clean_path(match[1]) and not _is_input(match[1]):
             return match[1]
     match = re.search(r"`(output[A-Za-z0-9_./-]*)`", text, re.I)
-    if match and (match[1].endswith("/") or match[1].lower() == "output"):
+    if match and _clean_path(match[1]) and (match[1].endswith("/") or match[1].lower() == "output"):
         return match[1].rstrip("/") + "/"
     return ""
 
@@ -82,16 +91,30 @@ def _explicit_files(text, pattern):
             match = FILE_LIST_TAIL.match(text, match.end())
 
 
-def _listed_files(text):
-    for match in FILE_LIST.finditer(text):
-        if OPTIONAL.search(match[0].split(":", 1)[0]):
+def _listed_files(text, pattern=FILE_LIST, bullets=FILE_BULLETS):
+    declarations = [(match.start(), match.end(), match[1], match[0].split(":", 1)[0])
+                    for match in pattern.finditer(text)]
+    if bullets:
+        declarations.extend((match.start(), match.end(), "", match[0])
+                            for match in bullets.finditer(text))
+    for start, end, first_line, declaration in sorted(declarations):
+        prefix = re.split(r"(?<=[.!?;])\s+|\n", text[max(0, start - 100):start])[-1]
+        if OPTIONAL.search(prefix + declaration):
             continue
-        lines = [match[1]]
-        following = text[match.end():].lstrip("\n").splitlines()
+        following = text[end:]
+        if not first_line and following and not following.startswith("\n"):
+            first_line = following.split("\n", 1)[0]
+            following = following[len(first_line):]
+        lines = [first_line]
+        following = following.splitlines()
         for line in following:
+            if not line.strip():
+                continue
             bullet = re.match(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)(.+)$", line)
             continuation = re.match(rf"^\s*(?:and\s+|,\s*)({FILE_PATH}.*)$", line, re.I)
             if not bullet and not continuation:
+                if line[:1].isspace():
+                    continue   # description continued underneath the preceding bullet
                 break
             lines.append((bullet or continuation)[1])
         for index, line in enumerate(lines):
@@ -100,7 +123,7 @@ def _listed_files(text):
                 if path and not _is_input(path) and not OPTIONAL.search(line[:named.start()]):
                     if not OPTIONAL_SUFFIX.match(line[named.end():]):
                         yield path
-                if index:
+                if index or first_line.lstrip().startswith(("- ", "* ", "+ ")):
                     break   # the bullet can also mention source or reference files
 
 
@@ -135,7 +158,8 @@ def extract_root(text):
     deliver = []
     for match in cands:
         prefix = re.split(r"(?<=[.!?;])\s+|\n", text[max(0, match.start() - 100):match.start()])[-1]
-        if OPTIONAL.search(prefix) or OPTIONAL_SUFFIX.match(text[match.end():]):
+        if (OPTIONAL.search(prefix) or re.search(r"\bor\s*$", prefix, re.I)
+                or OPTIONAL_SUFFIX.match(text[match.end():])):
             continue
         c = _clean_path(match[1])
         low = c.lower()
@@ -150,7 +174,7 @@ def extract_root(text):
     if m:
         p = _clean_path(m.group(1))
         prefix = re.split(r"(?<=[.!?;])\s+|\n", text[max(0, m.start() - 100):m.start()])[-1]
-        if (p.lower().endswith(EXT_OK) and not _is_input(p) and not OPTIONAL.search(prefix)
+        if (p.lower().endswith(EXT_OK) and not _is_input(p) and not OPTIONAL.search(prefix + text[m.start():m.start(1)])
                 and not OPTIONAL_SUFFIX.match(text[m.end():])):
             return p.strip()
     return deliver[-1].strip() if deliver else ""
@@ -193,7 +217,8 @@ def _exact_header(body):
     if fence or inline:
         raw = (fence or inline)[1]
     else:
-        raw = re.split(r"\s+in (?:this |any )?(?:exact )?order\b|(?<=\.)\s+",
+        raw = re.split(r"\s+in (?:this |any )?(?:exact )?order\b|"
+                       r"\s+and no (?:extra|additional) columns\b|(?<=\.)\s+",
                        raw.split("\n", 1)[0], flags=re.I)[0]
         raw = raw.rstrip(".;, ")
     try:
@@ -210,11 +235,13 @@ def _required_headers(text, required, directory, blocks):
     csv_paths = {path for path in required if path.lower().endswith(".csv")}
     if not csv_paths:
         return {}
+    mentioned = {_under_directory(name, directory) for item in NAMED_PATH.finditer(text)
+                 if (name := _clean_path(item[0])).lower().endswith(".csv")}
     headers = {}
     for path, body in blocks.items():
         path = _under_directory(path, directory)
         if path in csv_paths and (columns := _exact_header(body)):
-            headers[path] = (columns, not FLEXIBLE_HEADER.search(body))
+            headers[path] = (columns, _has_exact_header(body))
     for match in HEADER_DECLARATION.finditer(text):
         context = re.split(r"(?<=[.?!;)])\s+", text[max(0, match.start() - 160):match.start()])[-1]
         if OPTIONAL.search(context):
@@ -226,20 +253,25 @@ def _required_headers(text, required, directory, blocks):
         referred = re.search(r"\b([\w.-]+)\s+CSV\b", context, re.I)
         if referred and not named_paths:
             named_paths = {path for path in csv_paths if posixpath.basename(path)[:-4].lower() == referred[1].lower()}
-        if not named_paths and not re.search(r"\b(?:input|source|reference)\b", context, re.I):
+        if (not named_paths and mentioned <= csv_paths
+                and not re.search(r"\b(?:input|source|reference)\b", context, re.I)):
             named_paths = csv_paths
         if len(named_paths) == 1 and (path := next(iter(named_paths))) in csv_paths:
             if columns := _exact_header(tail):
-                headers.setdefault(path, (columns, not FLEXIBLE_HEADER.search(tail)))
+                headers.setdefault(path, (columns, _has_exact_header(context + tail)))
     return headers
+
+
+def _has_exact_header(description):
+    return bool(EXACT_HEADER.search(description) and not FLEXIBLE_HEADER.search(description))
 
 
 def count_claim(text):
     m = re.search(r"(\d+|one|two|three|four|five|six|seven)\s+(?:files|deliverables)\b", text, re.I)
     if not m:
         return None
-    w = m.group(1).lower()
-    return {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7}.get(w) or int(w)
+    count = m[1].lower()
+    return int(count) if count.isdecimal() else NUMBER_WORDS[count]
 
 
 def build(instruction, task_md=""):
@@ -295,13 +327,21 @@ def build(instruction, task_md=""):
 
     # a zip task usually still names the inner files; keep them as required members
     required, soft, zip_csv_rules = [], [], {}
-    zip_exact_paths = False
+    zip_exact_paths = explicit_members = False
     if mode == "zip":
         HARD_EXT = (".md", ".csv")
-        zip_exact_paths = bool(re.search(r"\bexact\s+(?:member\s+)?paths?\b", text, re.I))
-        explicit_members = bool(blocks and zip_exact_paths and re.search(
-            r"\b(?:required\s+members|members?\s+(?:are\s+required|must\b))", text, re.I))
-        for n in names:
+        zip_exact_paths = bool(re.search(r"\b(?:members?|archive entries)\b[^.!?]{0,120}"
+                                         r"\bexact\s+(?:member\s+)?paths?\b", text, re.I))
+        listed_members = list(dict.fromkeys(_listed_files(text, ZIP_MEMBER_LIST, bullets=None)))
+        explicit_members = bool(listed_members or (blocks and zip_exact_paths and re.search(
+            r"\b(?:required\s+members|members?\s+(?:are\s+required|is\s+required|must\b))", text, re.I)))
+        member_count = re.search(r"\b(\d+|one|two|three|four|five|six|seven)\s+members?\s+are required\b",
+                                 text, re.I)
+        checked_names = listed_members or names
+        if not listed_members and explicit_members and member_count:
+            count = member_count[1].lower()
+            checked_names = names[:int(count) if count.isdecimal() else NUMBER_WORDS[count]]
+        for n in checked_names:
             low = n.lower()
             base = os.path.basename(low)
             # inputs and house templates are filled in, never delivered back
@@ -309,13 +349,16 @@ def build(instruction, task_md=""):
                 continue
             if explicit_members and _clean_path(n) and not _is_input(n):
                 required.append(n)
-                if low.endswith(".csv") and (columns := _exact_header(blocks[n])):
-                    zip_csv_rules[n] = {"columns": columns, "exact": not FLEXIBLE_HEADER.search(blocks[n])}
             elif low.endswith(HARD_EXT):
                 required.append(n)
             elif low.endswith((".xlsx", ".dxf", ".json", ".docx")):
                 soft.append(n)
-        required, soft = required[:10], soft[:10]
+        if not explicit_members:
+            required, soft = required[:10], soft[:10]
+        else:
+            member_headers = _required_headers(text, required, "", blocks)
+            zip_csv_rules = {path: {"columns": columns, "exact": exact}
+                             for path, (columns, exact) in member_headers.items()}
         for n in soft:
             if not n.lower().endswith(".csv"):
                 headers.pop(n, None)
@@ -330,6 +373,7 @@ def build(instruction, task_md=""):
         "zip_required": required,
         "zip_soft": soft,
         "zip_exact_paths": zip_exact_paths,
+        "zip_explicit_members": explicit_members,
         "zip_csv_rules": zip_csv_rules,
         "csv_headers": {k: v for k, v in headers.items() if k.lower().endswith(".csv")},
         "all_named_files": names[:30],

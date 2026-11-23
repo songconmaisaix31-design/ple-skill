@@ -34,10 +34,12 @@ def check_docx(path, label):
             root = ET.fromstring(archive.read("word/document.xml"))
     except Exception as e:
         return fail(f"{label}: docx 打不开 ({e})")
-    for node in root.iter():
-        tag = node.tag.rsplit("}", 1)[-1]
-        if (tag == "t" and (node.text or "").strip()) or tag in {"drawing", "pict", "object", "sym"}:
-            return ok(f"{label}: docx 正文可解析")
+    body = next((element for element in root if element.tag.rsplit("}", 1)[-1] == "body"), None)
+    if body is not None:
+        for node in body.iter():
+            tag = node.tag.rsplit("}", 1)[-1]
+            if (tag == "t" and (node.text or "").strip()) or tag in {"drawing", "pict", "object", "sym"}:
+                return ok(f"{label}: docx 正文可解析")
     fail(f"{label}: docx 文档正文为空")
 
 
@@ -80,13 +82,18 @@ def check_zip(path, label, spec):
         return fail(f"{label}: zip 是空的")
     ok(f"{label}: zip {len(names)} 项")
     exact = spec.get("zip_exact_paths", False)
+    explicit = spec.get("zip_explicit_members", False)
     for req in spec.get("zip_required", []):
         hits = archive_hits(names, req, exact)
         if not hits:
             fail(f"{label}: 缺必需文件 {req}")
+        elif exact and len(hits) > 1:
+            fail(f"{label}: 必需路径重复 {req}")
+        elif explicit and z.getinfo(hits[0]).file_size == 0:
+            fail(f"{label}: 必需文件是 0 字节 {req}")
         else:
             ok(f"{label}: 含 {req}")
-            if exact and req.lower().endswith(".json"):
+            if explicit and req.lower().endswith(".json"):
                 try:
                     with io.TextIOWrapper(z.open(hits[0]), encoding="utf-8-sig") as source:
                         check_json_stream(source, f"{label}!{req}")
@@ -107,6 +114,8 @@ def check_zip(path, label, spec):
                     check_csv_stream(source, f"{label}!{name}", rule["columns"], rule["exact"])
             except (OSError, ValueError, zipfile.BadZipFile) as exc:
                 fail(f"{label}!{name}: CSV 不可读 ({exc})")
+        elif name not in spec.get("zip_required", []):
+            fail(f"{label}: 缺 CSV {name}")
     for name, cols in (spec.get("csv_headers") or {}).items():
         if name in exact_headers:
             continue
@@ -122,6 +131,8 @@ def check_zip(path, label, spec):
             ok(f"{label}: {name} 列头齐全 ({len(hdr)} 列)")
     for name in names:
         low = name.lower()
+        if exact and name not in spec.get("zip_required", []):
+            continue
         if spec.get("deep", True) and low.endswith((".docx", ".xlsx")) and not low.startswith("__macosx"):
             try:
                 payload = io.BytesIO(z.read(name))
@@ -175,20 +186,30 @@ def check_csv_stream(source, label, columns, exact):
 
 
 def declared_path(base, name):
+    if os.name == "nt":
+        name = name.replace("\\", "/")
     if not name or "\\" in name or "\x00" in name or ".." in name.split("/"):
         fail(f"交付路径无效：{name}")
         return None
     if os.path.isabs(name):
         return name
     path = os.path.join(base, name)
-    if os.path.commonpath((os.path.realpath(base), os.path.realpath(path))) != os.path.realpath(base):
+    if not is_within(base, path):
         fail(f"交付路径超出工作目录：{name}")
         return None
     return path
 
 
+def is_within(root, path):
+    root, path = os.path.realpath(root), os.path.realpath(path)
+    try:
+        return os.path.commonpath((root, path)) == root
+    except ValueError:
+        return False
+
+
 def check_file(path, label, spec, columns=None, exact=True):
-    if not os.path.isfile(path):
+    if not os.path.isfile(path) or os.path.islink(path):
         return fail(f"交付文件不存在：{label}")
     if os.path.getsize(path) == 0:
         return fail(f"交付文件是 0 字节：{label}")
@@ -239,14 +260,15 @@ def main():
     path = declared_path(a.base, deliv)
     if path is not None:
         print(f"[deliverable] {path}")
-        is_directory = deliv.endswith("/") or (not required and os.path.isdir(path))
+        is_directory = (spec.get("mode") == "dir" or deliv.endswith("/")
+                        or (not required and not posixpath.splitext(deliv)[1] and os.path.isdir(path)))
         if is_directory:
             check_directory(path, deliv, inspect_children=not required)
         for name in required or ([] if is_directory else [deliv]):
             file = declared_path(a.base, name)
             if file is None:
                 continue
-            if is_directory and os.path.commonpath((os.path.realpath(path), os.path.realpath(file))) != os.path.realpath(path):
+            if is_directory and not is_within(path, file):
                 fail(f"交付文件超出声明的目录：{name}")
                 continue
             check_file(file, name, spec, headers.get(name) or unordered.get(name), exact=name in headers)

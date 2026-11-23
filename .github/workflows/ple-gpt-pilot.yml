@@ -68,6 +68,8 @@ jobs:
             else
               echo 'The Hugging Face CLI could not exchange this runner identity.'
             fi
+            request_id=$(grep -m1 -oE '\(Request ID: (Root=)?[A-Fa-f0-9-]{16,80}\)' "$RUNNER_TEMP/ple-hf-oidc-error" || true)
+            if [[ -n "$request_id" ]]; then printf '%s\n' "$request_id"; fi
             exit 1
           fi
           [[ "$token" =~ ^hf_[A-Za-z0-9._-]+$ ]]
@@ -82,18 +84,31 @@ jobs:
             echo 'Hugging Face runner identity unavailable. Existing secrets or device login remain available.'
           fi
 
-      - name: Prepare Hugging Face device authorization for this runner
-        id: hf_device
-        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' }}
+      - name: Check existing Hugging Face dataset credentials
+        id: hf_credential
+        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' }}
         shell: bash
         env:
-          HF_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
+          PLE_HF_CONFIGURED_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
+          HF_HUB_DISABLE_TELEMETRY: '1'
         run: |
-          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
-          if [[ -n "$HF_TOKEN" || -s "$RUNNER_TEMP/ple-hf-oidc-token" ]]; then exit 0; fi
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN HF_TOKEN HUGGING_FACE_HUB_TOKEN HF_OIDC_ID_TOKEN HF_OIDC_RESOURCE
+          if selection=$(timeout 75 "$RUNNER_TEMP/ple-official/.venv/bin/python" \
+              devtools/hf_dataset_credential.py "$RUNNER_TEMP/ple-hf-oidc-token" 2>/dev/null) &&
+             [[ "$selection" =~ ^source=(secret|oidc|none)$'\n'state=(verified|absent|rejected|unavailable)$ ]]; then
+            printf '%s\n' "$selection" >> "$GITHUB_OUTPUT"
+          else
+            printf 'source=none\nstate=unavailable\n' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare Hugging Face device authorization for this runner
+        id: hf_device
+        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' && steps.hf_credential.outputs.source == 'none' }}
+        shell: bash
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN HF_TOKEN HUGGING_FACE_HUB_TOKEN HF_OIDC_ID_TOKEN HF_OIDC_RESOURCE
           umask 077
-          export HF_HOME="$RUNNER_TEMP/ple-hf-home"
-          printf 'HF_HOME=%s\n' "$HF_HOME" >> "$GITHUB_ENV"
+          export HF_HOME="$RUNNER_TEMP/ple-hf-home" HF_ENDPOINT=https://huggingface.co
           state="$RUNNER_TEMP/ple-hf-auth"
           nohup python3 devtools/hf_cloud_device.py \
             --hf "$RUNNER_TEMP/ple-official/.venv/bin/hf" --state "$state" \
@@ -137,20 +152,35 @@ jobs:
         if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' }}
         shell: bash
         env:
-          HF_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
+          PLE_HF_CONFIGURED_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
+          PLE_HF_CREDENTIAL_SOURCE: ${{ steps.hf_credential.outputs.source }}
+          PLE_HF_CREDENTIAL_STATE: ${{ steps.hf_credential.outputs.state }}
           HF_HUB_DISABLE_TELEMETRY: '1'
           HF_HUB_DISABLE_PROGRESS_BARS: '1'
           PLE_UNATTENDED: ${{ github.event.head_commit.message == 'Run authorized PLE pilot' }}
         run: |
-          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
-          if [[ -z "$HF_TOKEN" && -s "$RUNNER_TEMP/ple-hf-oidc-token" ]]; then
-            export HF_TOKEN
-            HF_TOKEN=$(cat "$RUNNER_TEMP/ple-hf-oidc-token")
-          fi
-          if [[ -z "$HF_TOKEN" && ( -z "${HF_HOME:-}" || ! -s "$HF_HOME/token" ) ]]; then
-            echo 'Official task not run. No authorized Hugging Face dataset credential is available.' | tee -a "$GITHUB_STEP_SUMMARY"
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN HF_TOKEN HUGGING_FACE_HUB_TOKEN HF_OIDC_ID_TOKEN HF_OIDC_RESOURCE
+          export HF_ENDPOINT=https://huggingface.co
+          case "$PLE_HF_CREDENTIAL_SOURCE" in
+            secret) HF_TOKEN=$PLE_HF_CONFIGURED_TOKEN ;;
+            oidc) HF_TOKEN=$(cat "$RUNNER_TEMP/ple-hf-oidc-token") ;;
+            none)
+              if [[ "$PLE_UNATTENDED" != true && -s "$RUNNER_TEMP/ple-hf-home/token" ]]; then
+                HF_TOKEN=$(cat "$RUNNER_TEMP/ple-hf-home/token")
+              fi
+              ;;
+          esac
+          unset PLE_HF_CONFIGURED_TOKEN
+          if [[ -z "${HF_TOKEN:-}" ]]; then
+            case "$PLE_HF_CREDENTIAL_STATE" in
+              absent) problem='No Hugging Face dataset credential is available.' ;;
+              rejected) problem='Hugging Face denied dataset access for the available credential(s) (HTTP 401 or 403).' ;;
+              *) problem='Hugging Face dataset access could not be verified.' ;;
+            esac
+            printf 'Official task not run. %s\n' "$problem" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
+          export HF_TOKEN
 
           cd "$RUNNER_TEMP/ple-official"
           task_dir="$RUNNER_TEMP/ple-official-task"
@@ -164,7 +194,8 @@ jobs:
           from huggingface_hub import HfApi, snapshot_download
           from huggingface_hub.errors import HfHubHTTPError
 
-          api = HfApi()
+          token = os.environ["HF_TOKEN"]
+          api = HfApi(token=token)
           repo = "google/physical-engineerings-last-exam"
           attempts = 1 if os.environ["PLE_UNATTENDED"] == "true" else 21
           for attempt in range(attempts):
@@ -187,7 +218,7 @@ jobs:
               if not re.fullmatch(r"[a-f0-9]{40}", revision):
                   raise RuntimeError("Invalid dataset revision")
               snapshot_download(repo, repo_type="dataset", revision=revision,
-                                allow_patterns=["tasks/wind-diaphragm-shear/**"], local_dir=sys.argv[1])
+                                allow_patterns=["tasks/wind-diaphragm-shear/**"], local_dir=sys.argv[1], token=token)
           except HfHubHTTPError as exc:
               status = getattr(exc.response, "status_code", None)
               raise SystemExit(f"Official task download failed (HTTP {status}).") from None
