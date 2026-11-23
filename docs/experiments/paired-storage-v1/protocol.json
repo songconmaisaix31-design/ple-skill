@@ -1,0 +1,174 @@
+{
+  "id": "paired-storage-v1",
+  "frozen_date_Asia_Shanghai": "2026-11-24",
+  "question": "Does enabling the first textual Python program improve the normalized score at 395 seconds on two previously unused six-period storage cases?",
+  "split": {
+    "development": [
+      "a",
+      "b",
+      "c"
+    ],
+    "holdout": [
+      "d",
+      "e"
+    ],
+    "training": [],
+    "unit": "An input instance from one synthetic storage-scheduling family. Identical task instructions are intentional.",
+    "selection": "A/B/C informed the original policy; exclude all three from replication statistics. Prepare D/E before any model run. Freeze model, code and scoring before scoring D/E. Once opened, these holdouts cannot confirm later retuning.",
+    "cases": {
+      "a": {
+        "split": "development",
+        "sha256": {
+          "input/periods.csv": "41ace2ec226673c66acd7d995ebf29f3dd4ba9b6d37dd144fdda4b37600ad717",
+          "input/site.json": "03dd97a11de9d22f0b6cc2536ce0f9153ede29e5673ca461edc0e5884636a4de",
+          "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475"
+        }
+      },
+      "b": {
+        "split": "development",
+        "sha256": {
+          "input/periods.csv": "e861924298648a9d069c8b1350c118b06d429a4babb5a2fe9ee8d6dfdf5e89de",
+          "input/site.json": "71b60e11a28619b4936aff485ec5e3fb10a7f81cd88c3a6cf8d209d9dd388a6a",
+          "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475"
+        }
+      },
+      "c": {
+        "split": "development",
+        "sha256": {
+          "input/periods.csv": "d0055120622d84c722d77c97b04d7e9e10bcf754a94184e11b10a689926e5f8a",
+          "input/site.json": "81889012e6759f994e9f9560e4acf55343959dabc62c49da8dab51a951057424",
+          "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475"
+        }
+      },
+      "d": {
+        "split": "holdout",
+        "sha256": {
+          "input/periods.csv": "66991d7ec54491dd75f1fa36f47d55885575ba507821ffe1828dc35eb8fdc699",
+          "input/site.json": "85070d73c54d750714a66646fea45c32e5fcbd4b2e7c6b9c3e9f1001694f1e47",
+          "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475"
+        }
+      },
+      "e": {
+        "split": "holdout",
+        "sha256": {
+          "input/periods.csv": "a196362b08772a3c559e99e740079d4330cc758e23f38385b882bb60bd1fc65a",
+          "input/site.json": "3347512fbb17c2407594f3b064b5e9bc119d963c0d110e68899d169ba7c157f8",
+          "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475"
+        }
+      }
+    }
+  },
+  "arms": {
+    "legacy": "Small-package compact prompt followed by the existing tool loop.",
+    "text": "Same small-package input and verifier. Enable one first textual Python program with an isolated execution and guard before the normal tool loop.",
+    "factor": "First Python action module on/off. Its prompt, response interface, first-call limit and feedback change together; no attribution among these pieces."
+  },
+  "design": {
+    "seeds": [
+      17
+    ],
+    "repetition_ids": [
+      1,
+      2,
+      3
+    ],
+    "pairing": [
+      "variant",
+      "repetition"
+    ],
+    "pairs": 6,
+    "arms_per_pair": 2,
+    "first_arm": {
+      "d": {
+        "1": "legacy",
+        "2": "text",
+        "3": "legacy"
+      },
+      "e": {
+        "1": "text",
+        "2": "legacy",
+        "3": "text"
+      }
+    },
+    "execution": "One GitHub-hosted runner per pair. Use separate task containers and model-server processes, reset KV state, repeat the identical function-call warm-up. The downloaded GGUF/binaries may be reused within a pair.",
+    "interpretation": "Repeated executions at one fixed seed and zero temperature measure repeatability across runners; they do not sample decoding seeds or independent task families."
+  },
+  "fixed_settings": {
+    "model": "unsloth/gemma-4-26B-A4B-it-GGUF",
+    "model_revision": "c099eb48e663fd284577b04978a94ffccb261841",
+    "gguf": "gemma-4-26B-A4B-it-UD-IQ2_XXS.gguf",
+    "gguf_sha256": "52f98e6fc6df62438dff8f57ac049f60b4c36acf93786b6aeeedc129acc02343",
+    "llama_cpp_build": "b12651",
+    "llama_cpp_linux_archive_sha256": "17b242259181d5b1b1f7719aba27929700a8b0dab39bfaef1b971a992b397b38",
+    "official_kit_commit": "8320f0402fdca9f42476607f72bcfd5271cd50c9",
+    "task_image": "python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b",
+    "runner": "ubuntu-24.04",
+    "model_cpu_threads": "min(nproc, 4)",
+    "gpu_layers": 0,
+    "parallel_slots": 1,
+    "model_context_tokens": 8192,
+    "reasoning": "off",
+    "temperature": 0,
+    "seed": 17,
+    "task_cpu_quota": 1,
+    "task_memory_mib": 256,
+    "declared_budget_seconds": 720,
+    "external_checkpoint_seconds": 395,
+    "normal_per_request_token_cap": 8000,
+    "text_first_action": {
+      "generation_token_cap": 1600,
+      "inference_seconds_cap": 390,
+      "fraction_of_remaining_work_time": 0.68,
+      "execution_seconds_cap": 30,
+      "guard_seconds_cap": 10
+    }
+  },
+  "metrics": {
+    "primary": "Independent grade.score at external 395-second cutoff. Score equals reference optimal cost divided by independently recomputed feasible cost. Invalid or absent deliverables score zero.",
+    "secondary": [
+      "grade.feasible",
+      "grade.optimal",
+      "first structurally verified action timing when instrumented; not directly comparable across arms"
+    ],
+    "full_budget_score": "Not measured in this experiment. Do not combine with the historical 720-second runs.",
+    "sample_variance": "For each repeat, average scores over both cases within each arm, then compute sample mean and sample variance (n-1 denominator) across the three repeat means. Compute paired delta = text minus legacy within each (case, repeat); aggregate the same way. List all six raw pairs and each case's scores.",
+    "missing": "A transport/infra failure, unreadable snapshot, unstable cutoff or missing record is unmeasured. Never replace it with a zero; show coverage. Only fully observed case pairs and repeats enter their respective descriptive summaries. No confirmatory decision with any incomplete pair.",
+    "retries": "Retain original attempts. Use the first measured result for each arm in the same valid paired execution. Re-run the entire pair only for a technical failure; never select the best score."
+  },
+  "decision": {
+    "positive_same_family": "All six pairs measured, neither held-out case has a negative mean paired difference, and all three repeat-level mean differences are positive. Keep the first-action module as a candidate only for small eligible Gemma CPU runs.",
+    "otherwise": "Mixed, tied or incomplete evidence does not support a general default switch. Keep both strategies available for controlled experiments.",
+    "official": "Never promote the official competition configuration on the strength of these two same-family cases. Confirm on a separately frozen task family or official evaluation."
+  },
+  "reproducibility": {
+    "baseline_parent": "0e7e3bb7f0c19e696c890b600a1936c1650577af",
+    "historic_full_budget_commit": "6d1ea191e8127356a83340cfa6b09ff6edf9bf77",
+    "historic_pr_commit": "0f0340c0dd3b821c539b60e717dc55f7368a3894",
+    "authoritative_experiment_code": "Use the exact Actions run head SHA for the workflow, generator, grader and all runtime source. The scorer runs on the host; only task.md and the two input files enter the task container.",
+    "code_paths": [
+      ".github/workflows/ple-cpu-pilot.yml",
+      "devtools/design_regression.py",
+      "devtools/run_design_regression.py",
+      "devtools/record_paired_arm.py",
+      "devtools/paired_storage_report.py",
+      "devtools/start_cpu_model.sh",
+      "devtools/cloud_model_probe.py",
+      "serve.py",
+      "skillkit/harness.py",
+      "skillkit/code_action.py",
+      "skillkit/model.py",
+      "skillkit/specgen.py",
+      "skillkit/guard.py",
+      "skillkit/transport.py"
+    ],
+    "prompt_paths": [
+      "devtools/design_regression.py:TASK",
+      "skillkit/harness.py:Harness._system",
+      "skillkit/harness.py:Harness.run",
+      "skillkit/code_action.py:OBJECTIVE",
+      "skillkit/code_action.py:FORMAT",
+      "skillkit/model.py:TOOLS"
+    ],
+    "release": "Present measured conclusions, per-arm and paired uncertainty, case-level results and a plot before composing the submission narrative. Publish failures and coverage alongside successful cases."
+  }
+}
