@@ -4,7 +4,7 @@ Physical-Engineering's Last Exam 参赛 harness。**spec-first + 交付物守卫
 
 > **云端实测（2026-11-23）**　Gemma 4 26B A4B 在 GitHub Actions 的 CPU 上完成了自建梁受力计算题。第 395 秒通过 1/8 项，约 647 秒时通过 8/8 项，包含四个独立校验的数值。[运行日志](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45171069072)
 > **正式开发集**　已尝试运行 `wind-diaphragm-shear`。Hugging Face 对运行器的凭据交换返回 `invalid_grant`，题目下载前流程结束。当前没有本项目的官方开发集分数或参赛 `artifacts/`。[正式题运行记录](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45167261631)
-> **工程验证**　固定的 26 个有效及无效文件样本上，交付物判定从 10/26 提升到 26/26。另有独立评分的储水调度算例，验证逐时段约束与最优成本。[实验方法与结果](docs/03-validation-methods.md)
+> **工程验证**　Gemma 4 26B A4B 在三个原创调度算例上，首轮使用 Python 后，第 395 秒均已交付全局最优解，同预算的原工具循环此时为 0/3。另一次完整预算里，两种首轮 Python 方案均为 3/3，原循环为 2/3。交付物校验器在固定样本上正确判定 26/26。正式 PLE 开发题评分仍待数据授权。[实验方法与结果](docs/03-validation-methods.md)
 > 下文“三项指标”衡量对主办方基线产物的离线静态回归。
 > 剩余任务、阻塞项、运行手册与合规红线见 **[HANDOFF.md](HANDOFF.md)**；评估原件见 `docs/00-接手评估.md`，修复记录见 `docs/01-修复与验证记录.md`，**F-01 处置说明见 `docs/02-合规说明.md`**。
 
@@ -103,10 +103,8 @@ bash devtools/wsl-run.sh ready    # 校验产物、重判、完整 kit check
    workdir 根目录就失效）。
 2. **守卫是结构性的**：只查路径、可解析性、列头、必需件，不判断工程内容对不对。
 3. **CSV 列头硬判**：若题面列头与 grader 实际接受的有偏差，会误判（已由 3 次熔断兜底）。
-4. **未跑过真模型**：本地模拟已覆盖原生 Claude 工具调用、取消和用量上报。官方 Docker 环境和真实模型仍待验证。
-5. **模型选择**：`submission.yaml` 现填 `google-cloud/claude-opus-5-5`。Claude 走
-   Anthropic 原生路径并显式打 `cache_control`（system + 最新消息），因为 dev 轨迹里
-   96% 的 prompt token 是 cached——不打就是每轮全价重付。
+4. **正式开发题评分**需要云端运行器获得 Hugging Face 题集读取权。已用真实 Gemma 模型完成官方 kit 合成任务和独立工程算例。[运行记录](docs/03-validation-methods.md)
+5. **模型选择**由 `submission.yaml` 声明，当前参赛配置为 `google-cloud/glm-5.2`。云端开发流程支持 GPT-6.1 Sol 和 HF 模型，使用本地量化 Gemma 时对适用的小型多文件任务启用首轮直接生成 Python。
 
 ## 下一步（按收益排序）
 
