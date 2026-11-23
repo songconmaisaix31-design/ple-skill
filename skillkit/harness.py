@@ -11,7 +11,7 @@ import json
 import posixpath
 import re
 
-from . import specgen, router
+from . import code_action, specgen, router
 from .guard import Guard
 from .mcp import declared_output_path, exact_copy_contract, exact_tool_text, named_output_paths, result_excerpt
 from .model import MCP_OUTPUT_TOOLS, PYTHON_SOURCE_MAX, PYTHON_TIMEOUT_DEFAULT, PYTHON_TIMEOUT_MAX
@@ -122,6 +122,7 @@ class Harness:
         path = self.spec.get("deliverable") or ""
         return (
             path.lower().endswith((".json", ".csv", ".txt"))
+            and len(self.spec.get("required_files") or []) <= 1
             and len(self.spec.get("all_named_files") or []) <= 1
             and (self.spec.get("claimed_count") or 1) == 1
         )
@@ -358,7 +359,7 @@ class Harness:
             sample += "\n[stdout sample truncated]"
         return f"[run_python] saved {len(data)} bytes to {path}\n{sample}"
 
-    async def _do(self, call):
+    async def _do(self, call, *, on_execution=None):
         name = call["name"]
         a = call.get("arguments") or {}
         if name in {"exec", "run_python"}:
@@ -386,6 +387,8 @@ class Harness:
             else:
                 command, timeout = a.get("command", ""), a.get("timeout_sec", 120)
             r = await self._mutate(self.t.exec, command, timeout)
+            if on_execution:
+                on_execution(r)
             if output_path is not None:
                 return await self._save_python_output(output_path, r)
             if r.get("ok") and self.spec.get("deliverable") and not self._verified_once and not self._first_exec_check:
@@ -485,7 +488,7 @@ class Harness:
         budget = asyncio.timeout_at(work_deadline)
         try:
             async with budget:
-                return await self._run(on_usage, on_log, wrap_at, clock)
+                return await self._run(on_usage, on_log, wrap_at, clock, work_deadline)
         except TimeoutError:
             if not budget.expired():
                 raise
@@ -502,7 +505,7 @@ class Harness:
             return "The task reached its time budget.\n" + (
                 self.final or "The deliverable could not be verified before the deadline.")
 
-    async def _run(self, on_usage, on_log, wrap_at, clock):
+    async def _run(self, on_usage, on_log, wrap_at, clock, work_deadline):
         snapshot = await self._snapshot()
         package_inputs, snapshot = await self._compact_package(snapshot)
         system = self._system(snapshot, compact_package=bool(package_inputs))
@@ -532,6 +535,15 @@ class Harness:
         else:
             prompt += "\n\nBegin. First read the inputs you need, then build."
         messages = [{"role": "user", "content": prompt}]
+
+        if mode := code_action.enabled_mode(self, package_inputs):
+            program_prompt = prompt + "\n\nDeclared file requirements:\n" + _fmt_contract(self.spec)
+            observation = await code_action.first_action(
+                self, mode, [{"role": "user", "content": program_prompt}],
+                on_usage, on_log, work_deadline, clock,
+            )
+            if observation:
+                messages.append({"role": "user", "content": observation})
 
         asked = 0
         while self.steps < MAX_STEPS:

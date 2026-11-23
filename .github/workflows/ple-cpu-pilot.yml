@@ -21,9 +21,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: ${{ fromJSON(github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' && '["a","b"]' || '["a"]') }}
+        variant: ${{ fromJSON(github.event.head_commit.message == 'Compare Python action strategies on cloud CPU' && '["a","b","c"]' || github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' && '["a","b"]' || '["a"]') }}
+        strategy: ${{ fromJSON(github.event.head_commit.message == 'Compare Python action strategies on cloud CPU' && '["legacy","native","text"]' || '["legacy"]') }}
     env:
-      DESIGN_BENCH: ${{ github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' }}
+      DESIGN_BENCH: ${{ github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' || github.event.head_commit.message == 'Compare Python action strategies on cloud CPU' }}
       VERIFY_MCP: ${{ startsWith(github.event.head_commit.message, 'Check PLE tool transport on the cloud CPU') }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -46,11 +47,19 @@ jobs:
           cd "$kit"
           uv sync
 
+      - name: Verify isolated execution and exact file exports
+        if: env.DESIGN_BENCH == 'true'
+        shell: bash
+        run: |
+          docker pull --platform linux/amd64 'python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b'
+          "$RUNNER_TEMP/ple-official/.venv/bin/python" devtools/run_design_regression.py \
+            --kit-root "$RUNNER_TEMP/ple-official" --check-transport | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Start the account-free CPU model and verify a real synthetic tool call
         shell: bash
         env:
           PLE_CPU_EVAL_GREEDY: ${{ env.DESIGN_BENCH }}
-          PROFILE: ${{ inputs.model || (github.event.head_commit.message == 'Test Granite on the cloud CPU' && 'granite') || 'auto' }}
+          PROFILE: ${{ (github.event.head_commit.message == 'Compare Python action strategies on cloud CPU' && 'gemma26') || inputs.model || (github.event.head_commit.message == 'Test Granite on the cloud CPU' && 'granite') || 'auto' }}
         run: |
           umask 077
           export MODEL_PROXY_URL=http://127.0.0.1:4102
@@ -105,8 +114,8 @@ jobs:
         shell: bash
         env:
           VARIANT: ${{ matrix.variant }}
+          PLE_CODE_ACTION: ${{ matrix.strategy }}
         run: |
-          docker pull --platform linux/amd64 'python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b'
           MODEL_API="$PLE_CPU_MODEL_API" MODEL_NAME="$PLE_CPU_MODEL_NAME" \
             "$RUNNER_TEMP/ple-official/.venv/bin/python" devtools/run_design_regression.py \
             --kit-root "$RUNNER_TEMP/ple-official" --variant "$VARIANT" --timeout-sec 720 | tee -a "$GITHUB_STEP_SUMMARY"

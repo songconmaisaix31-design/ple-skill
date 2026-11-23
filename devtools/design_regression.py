@@ -43,6 +43,13 @@ VARIANTS = {
             (4, 1, 5, 8), (5, 3, 1, 14), (6, 3, 5, 2),
         )),
     ),
+    "c": (
+        Site(1, 0, 5, 2, 2, (0, 1, 2, 3, 4, 5)),
+        tuple(Period(*row) for row in (
+            (1, 2, 4, 4), (2, 2, 0, 0), (3, 3, 5, 1),
+            (4, 2, 4, 6), (5, 2, 0, 0), (6, 2, 5, 2),
+        )),
+    ),
 }
 SCHEDULE_COLUMNS = ("period", "pump_units", "end_storage_units", "period_cost_cents")
 RESULT_FILENAMES = {"schedule.csv", "summary.json"}
