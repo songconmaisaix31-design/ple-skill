@@ -12,6 +12,8 @@
 
 下载可靠性提交 [`c3d73111`](https://github.com/songconmaisaix31-design/ple-skill/commit/c3d73111cd1f90ae57fb3e9fdef27c23152989e8) 因普通 push 另触发了 [45247632095](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45247632095)。它不是 H/I 配对矩阵，不进入本实验，也不作为分数证据。
 
+在第一份完成的 I3 原始工件上运行独立校验器时，发现 H/I 记录器把局部变量 `first` 从预登记的首臂名称覆盖成了“唯一脚本首答记录”数组，导致冗余的 `first_mode` 字段类型错误。该变量覆盖发生在两臂实验和 395 秒取样结束之后，不改变模型请求、返回代码、交付文件、顺序或分数。为避免根据已出现的结果决定是否重跑，在当前六组结束前冻结证据修复规则：原始 Actions 工件保持不变并单独归档；只有当错误字段逐字等于同一臂 `model-io.jsonl` 中唯一的 `call=1, scripted=true` 响应时，派生分析包才按协议的 `design.first_arm` 重建该字段，并记录修复前后 SHA-256。条件不满足的臂一律判无效，其他字段不做修补。该规则只恢复可由原始记录独立证明的分配元数据。
+
 ## F/G 已完成，保留首轮 Python 基线
 
 第 395 秒，F/G 六个同机配对的两臂均拿到满分。三次跨题平均分差均为 0，配对差样本方差为 0。六次候选都在首轮成功，实际源码反馈曝光 0/6。根据冻结协议，关于修复提示是否有益的证据不足。保留现有首轮 Python 策略，F/G 转入开发数据。[实验报告及逐次交付](repair-source-v1/README.md) · [F/G 运行](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45232669702)
