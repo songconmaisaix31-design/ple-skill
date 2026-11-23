@@ -31,6 +31,7 @@ raw, destination = map(Path, sys.argv[1:3])
 arm, position, first, phase, status = sys.argv[3:]
 status = int(status)
 variant = os.environ["VARIANT"]
+controlled_trial = variant in ("h", "i")
 key = os.environ["MODEL_PROXY_KEY"].encode()
 inputs = ("case/task.md", "case/input/site.json", "case/input/periods.csv")
 outputs = ("case/output/schedule.csv", "case/output/summary.json")
@@ -68,17 +69,24 @@ if log.exists():
 grade = (report or {}).get("grade")
 checkpoint = (report or {}).get("checkpoint") or {}
 run_sha = os.environ["GITHUB_SHA"]
-repair_trial = variant in ("f", "g")
-experiment = "repair-source-v1" if repair_trial else "paired-storage-v1"
+repair_trial = variant in ("f", "g") or controlled_trial
+experiment = ("controlled-repair-replay-v1" if controlled_trial else
+              "repair-source-v1" if repair_trial else "paired-storage-v1")
 protocol_path = f"docs/experiments/{experiment}/protocol.json"
 payload = subprocess.check_output(["git", "show", f"{run_sha}:{protocol_path}"])
 split = json.loads(payload)["split"]
 preregistered = split["cases"][variant]
-input_matches = (variant in split["holdout"] and preregistered["split"] == "holdout"
-                 and checksums == preregistered["sha256"])
+expected_inputs = preregistered["input_sha256"] if controlled_trial else preregistered["sha256"]
+expected_split = split["new_diagnostic_inputs"] if controlled_trial else split["holdout"]
+input_matches = (variant in expected_split and checksums == expected_inputs
+                 and (controlled_trial or preregistered["split"] == "holdout"))
 archive = (report or {}).get("model_io_archive") or {}
 io_complete = False
 source_exposed = None
+repair_requested = None
+controlled_source_valid = None
+release_sec = repair_dispatch_sec = None
+timing_valid = None
 io_file = destination / "model-io.jsonl"
 if io_file.is_file() and archive.get("complete") is True and not io_redacted:
     try:
@@ -87,6 +95,26 @@ if io_file.is_file() and archive.get("complete") is True and not io_redacted:
         if repair_trial and io_complete:
             records = [json.loads(line) for line in lines[:-1]]
             source_exposed = any(carries_source_excerpt(record) for record in records)
+            repair = [record for record in records if record.get("event") == "request"
+                      and record.get("call", 0) >= 2
+                      and len(record.get("body", {}).get("messages", [])) >= 3
+                      and str(record["body"]["messages"][2].get("content", "")).startswith(
+                          "The first Python program did not run cleanly.")]
+            repair_requested = bool(repair)
+            if controlled_trial:
+                first = [record for record in records if record.get("event") == "response"
+                         and record.get("call") == 1 and record.get("scripted") is True]
+                content = (first[0]["choices"][0]["message"].get("content") if len(first) == 1 else "")
+                match = re.fullmatch(r"```python\n(.*?)\n```", content or "", re.DOTALL)
+                controlled_source_valid = bool(
+                    match and hashlib.sha256(match[1].encode()).hexdigest()
+                    == "f4ece9d6d7e41e93f364db640b51b50c12c947ce1639fd2af991007dd76364f2")
+                release_sec = first[0].get("end_sec") if len(first) == 1 else None
+                repair_dispatch_sec = repair[0].get("start_sec") if repair else None
+                timing_valid = (type(release_sec) in (int, float)
+                                and type(repair_dispatch_sec) in (int, float)
+                                and abs(release_sec - 250) <= 2
+                                and release_sec <= repair_dispatch_sec <= release_sec + 5)
     except (ValueError, TypeError, AttributeError):
         io_complete = False
 observation = (phase == "experiment" and status in (0, 1)
@@ -95,6 +123,12 @@ observation = (phase == "experiment" and status in (0, 1)
                and isinstance(checkpoint, dict) and checkpoint.get("measured") is True
                and isinstance(grade, dict)
                and type(grade.get("optimal")) is bool and status == int(not grade["optimal"]))
+if controlled_trial:
+    action = (report or {}).get("first_code_action") or {}
+    observation = (observation and controlled_source_valid is True and timing_valid is True
+                   and repair_requested is True and action.get("classification") == "exec_failed"
+                   and action.get("exec_exit_status") == 1
+                   and source_exposed == (arm == "text-source"))
 cpus = int(subprocess.check_output(["nproc"], text=True).strip())
 cpu = next((line.split(":", 1)[1].strip() for line in Path("/proc/cpuinfo").read_text().splitlines()
             if line.startswith("model name") and ":" in line), "unknown")
@@ -104,10 +138,14 @@ metadata = {"variant": variant, "mode": arm, "repeat": int(os.environ["REPEAT"])
             "cpu_model": cpu, "logical_cpus": cpus, "model_threads": min(cpus, 4),
             "phase": phase, "exit_code": status, "observation": observation,
             "protocol_sha256": hashlib.sha256(payload).hexdigest(),
-            "input_sha256": checksums, "protocol_input_sha256": preregistered["sha256"],
+            "input_sha256": checksums, "protocol_input_sha256": expected_inputs,
             "input_matches_protocol": input_matches, "model_io_archive_complete": io_complete}
 if repair_trial:
-    metadata["repair_context_exposed"] = source_exposed
+    metadata.update(repair_requested=repair_requested, repair_context_exposed=source_exposed)
+if controlled_trial:
+    metadata.update(controlled_first_program_valid=controlled_source_valid,
+                    controlled_release_sec=release_sec, repair_dispatch_sec=repair_dispatch_sec,
+                    controlled_timing_valid=timing_valid)
 (destination / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 if report is not None:
     (destination / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -136,3 +174,4 @@ if repair_trial:
 with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as stream:
     stream.write(summary + "\n")
 sys.exit(0 if observation else 1)
+
