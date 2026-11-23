@@ -74,8 +74,9 @@ experiment = ("controlled-repair-replay-v1" if controlled_trial else
               "repair-source-v1" if repair_trial else "paired-storage-v1")
 protocol_path = f"docs/experiments/{experiment}/protocol.json"
 payload = subprocess.check_output(["git", "show", f"{run_sha}:{protocol_path}"])
-split = json.loads(payload)["split"]
-preregistered = split["cases"][variant]
+protocol = json.loads(payload)
+split = protocol["split"]
+preregistered = protocol["cases"][variant] if controlled_trial else split["cases"][variant]
 expected_inputs = preregistered["input_sha256"] if controlled_trial else preregistered["sha256"]
 expected_split = split["new_diagnostic_inputs"] if controlled_trial else split["holdout"]
 input_matches = (variant in expected_split and checksums == expected_inputs
