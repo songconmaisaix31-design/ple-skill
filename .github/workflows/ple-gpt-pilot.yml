@@ -164,16 +164,26 @@ jobs:
 
           cd "$RUNNER_TEMP/ple-official"
           uv run python - <<'PY'
+          import time
+
           from huggingface_hub import HfApi
           from huggingface_hub.errors import HfHubHTTPError
 
-          try:
-              HfApi().auth_check("google/physical-engineerings-last-exam", repo_type="dataset")
-          except HfHubHTTPError as exc:
-              status = getattr(exc.response, "status_code", None)
-              raise SystemExit(f"Hugging Face dataset permission check failed (HTTP {status}).") from None
-          except Exception:
-              raise SystemExit("Hugging Face dataset permission check could not complete.") from None
+          api = HfApi()
+          for attempt in range(21):
+              try:
+                  api.auth_check("google/physical-engineerings-last-exam", repo_type="dataset")
+              except HfHubHTTPError as exc:
+                  status = getattr(exc.response, "status_code", None)
+                  if status != 403 or attempt == 20:
+                      raise SystemExit(f"Hugging Face dataset permission check failed (HTTP {status}).") from None
+                  if attempt == 0:
+                      print("Hugging Face login succeeded. Waiting for the separate PLE dataset grant (HTTP 403).", flush=True)
+                  time.sleep(15)
+              except Exception:
+                  raise SystemExit("Hugging Face dataset permission check could not complete.") from None
+              else:
+                  break
           print("Hugging Face dataset access verified.")
           PY
 
