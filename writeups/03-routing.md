@@ -22,7 +22,7 @@
 很多题的 workdir 长这样：
 
 ```
-/filesystem/dc_structural__eor_revision__blind
+/filesystem/一个结构路径标签__eor_revision__blind
 /filesystem/final_batch4__electrical_task17_ec_0205_d100__blind
 /filesystem/final_batch4__mechanical_task3_ct_heat_lcc__blind
 ```
@@ -42,8 +42,8 @@
 
 | 题 | truth | 第一版给出 | 原因 |
 |---|---|---|---|
-| `data-hall-device-takeoff` | electrical | cost | "takeoff" 在 cost 词表里权重高，但这是"设备清单"不是"造价" |
-| `permission-to-operate-memo` | permit | electrical | "PTO" 在 electrical 里，"permission to operate" 在 permit 里，前者次数多 |
+| `一道设备清单题` | electrical | cost | "takeoff" 在 cost 词表里权重高，但这是"设备清单"不是"造价" |
+| `一道送电许可题` | permit | electrical | "PTO" 在 electrical 里，"permission to operate" 在 permit 里，前者次数多 |
 
 修法三条：
 
@@ -57,9 +57,9 @@
 剩下 6 个错分我没有继续压，因为看过之后发现：**其中一部分是"这道题本来就跨专业"**，
 不是分类错。
 
-- `fire-solve-convergence`：truth 是 fire，内容是一场 CFD 收敛判定。fire 和 cfd 都说得通
-- `eor-review-corrections`：路径标签是 `dc_structural`，但题面大量出现电气审图意见——它是"结构 EOR 回应别人的意见"
-- `mv-conveyance-study`：路径标签 `electrical_task12`，truth 却被标成 civil（中压电缆的输送方案，我甚至认为 electrical 更对）
+- `一道 CFD 收敛题`：truth 是 fire，内容是一场 CFD 收敛判定。fire 和 cfd 都说得通
+- `一道审图意见题`：路径标签是 `一个结构路径标签`，但题面大量出现电气审图意见——它是"结构 EOR 回应别人的意见"
+- `一道输送方案题`：路径标签 `一个电气路径标签`，truth 却被标成 civil（中压电缆的输送方案，我甚至认为 electrical 更对）
 
 继续调词表就是在拟合这 6 道题，收益低、过拟合风险高。**23/29 停手。**
 

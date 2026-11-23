@@ -46,8 +46,20 @@ FAMILIES = {
 }
 
 
+# A workspace path may carry a generic discipline word. Keep this as a weak
+# prior only: the instruction text is always the primary routing signal.
+PATH_PRIOR = 4
+
+
 def path_hint(instruction):
-    """The workspace path usually carries the project family (__electrical_task12__)."""
+    """Return a discipline hint from a workspace path, or None.
+
+    Fair-play note (F-01): this matches only generic discipline words such as
+    ``electrical`` / ``mechanical`` / ``structural``. It never matches a task
+    id, never branches on a specific task, and never reads graders, reference
+    files or artifacts. Deliberately weak so a path cannot override the task
+    text.
+    """
     m = re.search(r"/(?:filesystem|app|workspace)/[A-Za-z0-9_./\-]+", instruction[:900])
     if not m:
         return None
@@ -77,7 +89,7 @@ def route(instruction, spec=None):
         scores[dom] = s
     ph = path_hint(instruction)
     if ph:
-        scores[ph] = scores.get(ph, 0) + 9
+        scores[ph] = scores.get(ph, 0) + PATH_PRIOR
     if spec and spec.get("mode") == "ifc":
         scores["mep"] = scores.get("mep", 0) + 4
     ranked = sorted(scores.items(), key=lambda kv: -kv[1])

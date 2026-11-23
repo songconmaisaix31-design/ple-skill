@@ -1,5 +1,7 @@
 # GOAL & ACCEPTANCE CRITERIA
 
+> **状态说明（2026-11-23）**：下表「当前」列是 v1 设计稿在**有 baseline artifacts 的原 Linux 环境**下量到的目标值；本机缺 `ple-template`，`criteria.py` 会如实把 G-05~G-08 判为 **GATE-D BLOCKED**，而不是 PASS。**实际状态一律以 `python criteria.py` 输出与 `HANDOFF.md` 为准**。G-07 的 ground truth 已改为仓库外 `--truth` 显式传参。
+
 竞品：Physical-Engineering's Last Exam（Google 赞助，2026-11-09 → 2027-01-05）。
 提交形态：一个 GitHub commit（根目录 `submission.yaml` + `serve.py` + 同 commit 的 `artifacts/`）。
 评分：交付物的精确路径/文件名/格式/内容占绝大多数分；rubric judge 另读 `done.final_message`。
@@ -32,11 +34,13 @@
 | G-04 | 全部 Python 文件可编译 | `py_compile` | PASS |
 | G-05 | 29 道 dev 题**全部**能路由到 `skills/` 下真实存在的目录 | `criteria.py` | PASS 29/29 |
 | G-06 | specgen 从 instruction 解出交付路径 ≥ 25/29 | `criteria.py` | PASS 25/29 |
-| G-07 | router 细领域判定 ≥ 23/29（与 `skeleton2.json` 的 ground truth 比） | `criteria.py` | PASS 23/29 |
-| G-08 | guard 对 baseline 真实产出的回归 ≥ 19/24 PASS/WARN | `criteria.py` | PASS 19/24 |
+| G-07 | router 细领域判定 ≥ 23/29（与**仓库外** `--truth` 指定的 ground truth 比） | `criteria.py` | 历史值 23/29；本机需外部数据复验 |
+| G-08 | guard 对 baseline 真实产出的回归 ≥ 19/24 PASS/WARN | `criteria.py` | 历史值 19/24；本机需外部数据复验 |
 | G-09 | `dryrun.py` 闭环：守卫拒绝 → 强制修复 → 放行，退出码 0 且交付物存在 | `python3 dryrun.py` | PASS |
+| G-12 | F-01 静态合规：无 dev 题指纹、不读 reference / 自己的 `artifacts/` | `devtools/f01_check.py` | PASS 8/8（含官方 29 个 task id 精确比对） |
 
 **GATE-A 全过 = 代码层面没有自相矛盾。** 这一层不需要 Docker，可以随时重跑，改动后必须重跑。
+实际 `criteria.py` 中 G-05~G-08 归入 **GATE-D**（依赖外部 dev 数据），缺数据时为 BLOCKED；GATE-A 现为 6 项（G-01~G-04 / G-09 / G-12）。
 
 ### GATE-B：可提交（需 Docker + 真模型端点）
 

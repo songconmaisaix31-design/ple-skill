@@ -1,7 +1,7 @@
 ---
 name: ple-structural
 domain: structural
-covers: seismic-diaphragm-shear, wind-diaphragm-shear, roof-deck-design, footing-settlement-verification, shoring-design-verification, frame-extension-method, eor-review-corrections, foundation-strategy
+scope: 结构 / 岩土类隔板剪力、楼屋面设计、临时工程、审图与验算交付包
 ---
 
 # 结构 / 岩土
@@ -19,18 +19,18 @@ covers: seismic-diaphragm-shear, wind-diaphragm-shear, roof-deck-design, footing
 
 ## 工作法
 
-1. **先锁规范版本与失效组合**。`design_basis.md` 第一节永远写"哪些文件管、冲突怎么解决"。地震题常见 ASCE 7 / IBC / 项目 criteria 三层。
-2. **参数先落 JSON/表，再算**。baseline 里 `temporary_works.json`、`deck_design.xlsx` 的 `DesignBasis` 表都是"参数先固化"的做法。
+1. **先锁规范版本与失效组合**。`design_basis.md` 第一节永远写"哪些文件管、冲突怎么解决"。常见 ASCE 7 / IBC / 项目 criteria 三层。
+2. **参数先落 JSON/表，再算**。把假设、单位、来源固化成 `DesignBasis` 之类的结构化表，再进入计算，便于复核。
 3. **分区（zoning）要早做**。屋面/楼板题的分数大头在"分成几个区、每区取什么控制工况"。
-4. **每个结论都能追到一个 `stage_id` / `zone`**。stability_check 的每行都有 `verdict`，不要写"总体安全"这种不可核验的话。
+4. **每个结论都能追到一个 `stage_id` / `zone`**。校核表每行都要有 `verdict`，不要写"总体安全"这种不可核验的话。
 
-## 必需件与列头
+## 必需件与列头（通用格式惯例）
 
 ### 隔板剪力（zip）
 `diaphragm_shear.csv` + `calc_book.xlsx` + `constraint_register.csv` + `design_basis.md`
 
 ### 楼面/屋面（zip）
-`deck_design.xlsx` 工作表组：`Zones` `DesignBasis` `Drifts` `CalcSummary` `Diaphragm` `BOM`
+`deck_design.xlsx` 常见工作表组：`Zones` `DesignBasis` `Drifts` `CalcSummary` `Diaphragm` `BOM`
 `design_basis.md` 章节：
 ```
 1. Governing documents and how conflicts were resolved
@@ -43,7 +43,7 @@ covers: seismic-diaphragm-shear, wind-diaphragm-shear, roof-deck-design, footing
 ```
 
 ### 工序 / 临时工程（zip）
-| 文件 | 列头（照抄） |
+| 文件 | 列头（照题面要求调整） |
 |---|---|
 | `construction_sequence.csv` | `activity_id,zone,level,activity_type,predecessors,duration_days,start_day,finish_day,crew,crane_hours,workspace_volume_cf,gang_id,daily_crane_draw,volume_basis` |
 | `stability_check.csv` | `stage_id,zone,level,lateral_system,demand_lb,capacity_lb,verdict,wind_case,notional_case,vertical_load_supported,governing_case` |
@@ -55,7 +55,7 @@ covers: seismic-diaphragm-shear, wind-diaphragm-shear, roof-deck-design, footing
 `temporary_works.json`：设计人资质、验算假设、审批链。
 
 ### 审图（zip）
-| 文件 | 列头（大写，照抄） |
+| 文件 | 列头（大写，照题面要求调整） |
 |---|---|
 | `disposition_register.csv` | `PACKAGE,COMMENT_ID,AUTHOR,SIGNIFICANCE,VALIDITY,VOID_REASON,RESPONSE,RESOLUTION,PRIMARY_SHEET,PRIMARY_VIEW,CHANGE_KIND,SHEETS_CHANGED,SHEETS_IMPACTED,CLOSURE` |
 | `issue_plan.csv` | `PACKAGE,BUNDLE_ID,BUNDLE_FILE,SHEET_NUMBER,DISCIPLINE_DESIGNATOR,PLOT_PDF_MB,BUNDLE_SEQ` |
@@ -65,10 +65,10 @@ covers: seismic-diaphragm-shear, wind-diaphragm-shear, roof-deck-design, footing
 `design_basis.md` 用 `A. / B. / C.` 大写字母分节，不是数字。
 `continuation_sheet.md` 是给合同官的变更说明，按 package 分段。
 
-**审图题的核心判断是"哪条意见可以合法地直接改"**——要区分 mark-up 的作者权限（EOR 能改，承包商不能），这个判断写进 design_basis 的 `B. Which markups can direct a change`。
+**审图类任务的核心判断是"哪条意见可以合法地直接改"**——要区分 mark-up 的作者权限（设计方能改，施工方不能），这个判断写进 design_basis 的 `B. Which markups can direct a change`。
 
 ### 验算备忘录（docx）
-固定骨架（baseline 用了业主模板 `*_TEMPLATE_v1.docx`，有模板就必须套模板）：
+固定骨架（工作区里出现 `*_TEMPLATE*.docx` 就必须套模板）：
 ```
 [公司抬头]
 VERIFICATION MEMORANDUM
@@ -89,4 +89,4 @@ From: / Date:
 - 验算结论写"基本满足"——必须是二值判定 + 遗留条件
 - 审图题漏 `VOID_REASON`：无效意见必须写明为什么无效
 - 工序题 `predecessors` 写成自然语言而不是 activity_id
-- 借用别题模板时忘了换项目名和日期（artifact 哈希能查出来，但评分也会扣）
+- 借用模板时忘了换项目名和日期

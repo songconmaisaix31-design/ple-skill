@@ -2,9 +2,9 @@
 
 Physical-Engineering's Last Exam 参赛 harness。**spec-first + 交付物守卫**的第一版实现。
 
-> **当前状态（2026-11-23）**：代码已修复并通过离线自测与协议往返冒烟，但 **`kit check` 未跑、真模型端到端未验证、`artifacts/` 不存在、dev 分数为 0**。
+> **当前状态（2026-11-23）**：代码已修复并通过离线自测与协议往返冒烟；**F-01 静态合规清理已完成**（`devtools/f01_check.py` 8/8、`criteria.py` GATE-A 6/6）。但 **`kit check` 未跑、真模型端到端未验证、`artifacts/` 不存在、dev 分数为 0**。
 > 本文的「三项指标」是**对 baseline artifacts 的离线静态回归**，不是本 harness 跑过 29 题。
-> 剩余任务、阻塞项、运行手册与合规红线见 **[HANDOFF.md](HANDOFF.md)**；评估原件见 `docs/00-接手评估.md`，修复记录见 `docs/01-修复与验证记录.md`。
+> 剩余任务、阻塞项、运行手册与合规红线见 **[HANDOFF.md](HANDOFF.md)**；评估原件见 `docs/00-接手评估.md`，修复记录见 `docs/01-修复与验证记录.md`，**F-01 处置说明见 `docs/02-合规说明.md`**。
 
 设计原点：**MCP 作为中心**——serve.py 持有会话与决策循环，所有动作（exec / read_file /
 write_file / mcp_call）都经由 competition protocol 走 WebSocket 回到 evaluator；MCP server
@@ -43,10 +43,12 @@ skillkit/
 dryrun.py              无 Docker、无 key 的离线自测（含"守卫拒绝→修复→通过"路径）
 skills/
   _shared/             SKILL.md（五件套 / 约束台账 / 收尾三段式）+ validate.py（守卫）
-  electrical/ structural/ mep/ civil/ misc/  各领域 SKILL.md + checklist.md（29 题全覆盖）
+  electrical/ structural/ mep/ civil/ misc/  各领域 SKILL.md + checklist.md（通用格式惯例，无 dev 题指纹）
 requirements.txt       websockets==15.0.1  httpx==0.28.1
-criteria.py            可执行验收判据（GATE-A 本地 / GATE-B 可提交）
+criteria.py            可执行验收判据（GATE-A 本地 / GATE-D 数据 / GATE-B 可提交）
+devtools/f01_check.py  F-01 静态合规自检（已接入 criteria.py 的 G-12）
 GOAL.md                目标、里程碑、硬约束、非目标
+docs/                  交接评估、修复记录、F-01 合规说明
 writeups/              5 篇技术叙事：为什么是这个形状、踩过的坑、还没证明的部分
 ```
 
@@ -55,11 +57,11 @@ writeups/              5 篇技术叙事：为什么是这个形状、踩过的�
 | 环节 | 结果 | 说明 |
 |---|---|---|
 | specgen 路径解析 | **25 / 29** | 4 道短题（offset / footing / solar×2）题面完全不写路径，转成 `confidence=low`，由模型读 task.md 与 house 模板自行确立 |
-| specgen 结构抽取 | zip 型抽出 27 列 CSV 头、必需成员、`### N.` 文件清单 | `lv-cable-sizing` 的 `wire_schedule.csv` 28 列可完整还原 |
+| specgen 结构抽取 | zip 型抽出 CSV 列头、必需成员、`### N.` 文件清单 | 某电缆选型题的 `wire_schedule.csv` 列头可完整还原 |
 | router 领域判定 | **23 / 29** | 错分多为"该题本身就是跨专业"；`_shared` 始终加载，不致命 |
 | guard 对 baseline 真实产出 | **17 PASS / 2 WARN / 5 FAIL / 3 no-path**（共 27 题有产出） | 5 个 FAIL 中有 1 个是 baseline 真的漏交了题面要求的 `instruction_to_engineer.md`；其余是 baseline 落在与题面不同的位置上——这正是守卫要抓的东西 |
 
-`lv-cable-sizing` 的真实产物经自动合同判定 PASS（5 项 zip 成员、27 列列头、2 个嵌套 xlsx 可解析）。
+一道电缆选型题的 baseline 真实产物经自动合同判定 PASS（zip 成员齐全、CSV 列头与嵌套表格可解析）。
 
 ## 本地怎么跑
 

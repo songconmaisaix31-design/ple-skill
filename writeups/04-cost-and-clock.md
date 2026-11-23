@@ -7,7 +7,7 @@ PLE 给每个 harness 的预算是 **6 小时 / 题 / 次**，hidden test 跑 3 
 
 ## 96% 的输入是重复的
 
-我在 baseline 的 trace 里找到一个数字：`data-hall-mep-routing` 单题消耗
+我在 baseline 的 trace 里找到一个数字：`一道机房布线题` 单题消耗
 **1894 万 prompt token，其中 1821 万是 cached**。也就是 96%。
 
 原因不难理解：这一题要读 7 张 PNG 图纸，模型每一步都带着前面读过的全部上下文。

@@ -98,10 +98,16 @@ def g04_compile():
 # ---------------- DATA-DRIVEN ----------------
 
 def load_tasks(template):
-    """Read the dev-set instructions out of the baseline artifacts."""
-    base = os.path.join(template, "artifacts")
+    """Development-only: read dev instructions from an EXTERNAL template dir.
+
+    This function is never reached by serve.py / skillkit (the actual harness).
+    Official fair-play rule allows local evaluation, but the harness itself
+    must never read dev graders or reference files. Path is supplied explicitly;
+    no reference-data path is baked into this repo.
+    """
+    base = os.path.join(template, "artifacts") if template else ""
     out = {}
-    if not os.path.isdir(base):
+    if not base or not os.path.isdir(base):
         return out
     for d in sorted(os.listdir(base)):
         tj = os.path.join(base, d, "trajectory.json")
@@ -116,10 +122,17 @@ def load_tasks(template):
     return out
 
 
-def truth_domains():
-    p = os.path.join(HERE, "skeleton2.json")
+def truth_domains(path):
+    """Development-only ground truth, supplied from OUTSIDE the repo.
+
+    The previous in-repo skeleton2.json was derived from baseline artifacts and
+    has been removed (F-01). Without an explicit --truth, G-07 is BLOCKED
+    rather than silently scoring 0/29.
+    """
+    if not path or not os.path.isfile(path):
+        return {}
     try:
-        sk = json.load(open(p))
+        sk = json.load(open(path))
         if isinstance(sk, dict):
             sk = list(sk.values())
         return {x["task"]: x.get("domain") for x in sk if isinstance(x, dict) and "task" in x}
@@ -167,6 +180,10 @@ def g07_router(tasks, truth):
     if not data_ready(tasks):
         rec("G-07", "router 细领域判定 ≥ 23/29", "BLOCKED",
             f"只有 {len(tasks)}/{DEV_TASKS} 题题面，阈值不得随数据量退化", "D")
+        return False
+    if not truth:
+        rec("G-07", "router 细领域判定 ≥ 23/29", "BLOCKED",
+            "缺外部 ground truth；用 --truth <path> 指向仓库外的 domain 标注文件", "D")
         return False
     from skillkit import router, specgen
     hit, miss = 0, []
@@ -221,6 +238,18 @@ def g09_dryrun():
                      "退出码 %d；%s" % (r.returncode, "守卫拒绝后修复放行" if ok else out[-300:]))
 
 
+def g12_f01():
+    """F-01 static check is part of GATE-A: compliance must not regress."""
+    p = os.path.join(HERE, "devtools", "f01_check.py")
+    if not os.path.isfile(p):
+        return gate_pass("G-12", "F-01 静态合规自检", False, "devtools/f01_check.py 缺失")
+    r = subprocess.run([sys.executable, p], capture_output=True, cwd=HERE)
+    out = r.stdout.decode(errors="replace")
+    ok = r.returncode == 0 and "F-01 静态合规检查：PASS" in out
+    detail = "PASS" if ok else (out[-300:] or r.stderr.decode(errors="replace")[-300:])
+    return gate_pass("G-12", "F-01 静态合规自检", ok, detail)
+
+
 def g10_artifacts():
     p = os.path.join(HERE, "artifacts")
     docker = shutil.which("docker") is not None
@@ -251,23 +280,27 @@ def g11_known_blockers():
     rec("T-03", "真模型端到端跑通 serve.py", "BLOCKED" if not key else "TODO",
         "需要 MODEL_PROXY_URL/KEY 或 MODEL_BASE_URL + MODEL_API_KEY", "B")
     rec("T-04", "dev 分数 ≥ baseline 参照", "TODO", "依赖 T-02 与 T-03", "B")
-    rec("F-01", "无按题指纹分支（人工复核）", "TODO",
-        "router 只用领域词表与路径家族标签；specgen 只看题面文本，不按 task id 分支", "B")
+    rec("F-01", "无按题指纹分支（提交前人工复核最终 commit）", "TODO",
+        "静态指纹已由 G-12 自动检查；提交前复核运行日志与最终 commit 内容", "B")
     rec("F-02", "artifacts 为提交版 harness 原样产出", "TODO",
         "manifest.json 哈希需与代码同 commit；改代码必须重跑全量 dev", "B")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--template", default="/home/user/work/ple-template")
+    ap.add_argument("--template", default=os.environ.get("PLE_TEMPLATE", ""),
+                    help="外部 ple-template 目录；仓库不内置任何 dev 题面或 reference 数据")
+    ap.add_argument("--truth", default=os.environ.get("PLE_TRUTH", ""),
+                    help="仓库外的 domain ground-truth JSON，供 G-07 开发期判据使用")
     a = ap.parse_args()
 
     tasks = load_tasks(a.template)
-    truth = truth_domains()
+    truth = truth_domains(a.truth)
     # Environment prerequisite, deliberately not part of GATE-A: a missing
     # template must never be reported as a code failure or as a silent pass.
     rec("INFO", "dev 题面可读（环境前置）", "PASS" if data_ready(tasks) else "BLOCKED",
-        f"{len(tasks)}/{DEV_TASKS} 题 from {a.template}", "E")
+        f"{len(tasks)}/{DEV_TASKS} 题" +
+        (f" from {a.template}" if a.template else "（未指定外部 template，开发期判据不可用）"), "E")
 
     g01_layout()
     g02_submission_yaml()
@@ -278,6 +311,7 @@ def main():
     g07_router(tasks, truth)
     g08_guard_regression(tasks)
     g09_dryrun()
+    g12_f01()
     g10_artifacts()
     g11_known_blockers()
 

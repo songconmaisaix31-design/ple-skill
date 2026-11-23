@@ -1,7 +1,7 @@
 ---
 name: ple-civil
 domain: civil
-covers: emergency-spillway-check, fill-compaction-acceptance, landscape-sheet-revision, mv-conveyance-study
+scope: 土木 / 水利 / 景观 / 场地类工程文档与计算交付包
 ---
 
 # 土木 / 水利 / 景观 / 场地
@@ -16,16 +16,16 @@ covers: emergency-spillway-check, fill-compaction-acceptance, landscape-sheet-re
 
 ## 工作法
 
-1. **memo 型先给 Bottom Line**。这几题的 memo 第一节就叫 `Purpose and Bottom Line` 或 `Bottom line`——结论在最前，后面才是推导。不要写成"分析-分析-结论"。
-2. **套业主模板**。`Thelbridge_*_TEMPLATE*.docx` 这种文件在目录里出现，就说明必须套：抬头、署名块、日期位置都不能重排。
+1. **memo 型先给 Bottom Line**。这类 memo 的第一节通常是 `Purpose and Bottom Line` 或 `Bottom line`——结论在最前，后面才是推导。不要写成"分析-分析-结论"。
+2. **套业主模板**。工作区里出现 `*_TEMPLATE*.docx` 这类文件时，就说明必须套：抬头、署名块、日期位置都不能重排。
 3. **判定必须二值且逐项**。验收类：`ACCEPTED / REJECTED`，且每个测试项单独给 Result。禁止"总体合格，个别需关注"。
-4. **日期是硬约束**。civil 题的 memo 几乎都在争一个日期（11/30 能不能承诺）。全文所有日期必须自洽，且与"基准日"一致。
+4. **日期是硬约束**。这类 memo 常围绕一个承诺日期展开。全文所有日期必须自洽，且与题面或工作区文件给出的"基准日"一致。
 5. **中间量必须留在表里**。干密度、含水率、与最大干密度的比值、限值，四列并列，缺一行就无法复核。
 
-## 必需件与列头
+## 必需件与列头（通用格式惯例）
 
 ### memo（docx）
-结构（水利与景观两题共用一个骨架）：
+同类 memo 可共用一个骨架：
 ```
 [公司抬头]
 MEMORANDUM
@@ -44,7 +44,7 @@ Attachments A / B / ...
 ```
 
 ### 验收记录（xlsx + docx）
-xlsx 工作表组固定：
+xlsx 工作表组常见形态：
 ```
 Cover / Daily Placement Log / Notes / Signature
 ```
@@ -52,18 +52,18 @@ docx 用业主模板，五个一级章节：
 ```
 1. PURPOSE
 2. DOCUMENTS REVIEWED      ← 表：# / Document / Date / Cited as
-3. BASIS OF REVIEW         ← 含判据推导（如 P04: 128.4 pcf at 9.2%）
+3. BASIS OF REVIEW         ← 含判据推导与输入取值
 4. FINDINGS                ← 表：Test / Location / 实测 / % / 限值 / 结果
 5. CONCLUSION AND RECOMMENDATION   ← Determination: REJECTED / ACCEPTED
 ```
 
 ### 输送方案（zip）
-`conveyance_study.xlsx` 工作表组（11 个，照抄）：
+多表工作簿常见工作表组（照题面要求调整）：
 ```
 Items / Segments / Structures / Pulls / Alternatives / Takeoff /
 LaborRates / EquipmentRates / Markups / Register / Findings
 ```
-`conveyance_study_report.md` 章节：
+报告章节：
 ```
 1. Summary of recommendations
 2. Estimating basis
@@ -76,8 +76,8 @@ LaborRates / EquipmentRates / Markups / Register / Findings
 
 ## 常见死法
 
-- memo 写成论文式（背景→分析→建议），结论不在最前 → rubric 判"不专业"
+- memo 写成论文式（背景→分析→建议），结论不在最前 → 判"不专业"
 - 验收题只给结论不给逐项 Result
 - 用了业主模板但改了署名块/页眉 → 格式分直接没
 - 输送方案只给总价，不给单价来源（LaborRates/Markups 两张表是核价依据）
-- memo 里的日期与附件日期互相矛盾（这类题专门考日期链）
+- memo 里的日期与附件日期互相矛盾；日期链常被重点核查

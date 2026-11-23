@@ -38,8 +38,8 @@ for s in wb.iter():
 if s.tag.split("}")[-1] == "sheet":
 ```
 
-修完之后我在真实产出上批量验证：11 份 zip PASS、`lv-cable-sizing`（5 项成员 / 27 列 / 2 个嵌套 xlsx）
-PASS、`mv-conveyance-study`（11 sheets）PASS、`life-cycle cost`（3 套算稿 × 5 sheets）PASS。
+修完之后我在真实产出上批量验证：11 份 zip PASS、`一道电缆选型题`（5 项成员 / 27 列 / 2 个嵌套 xlsx）
+PASS、`一道输送方案题`（11 sheets）PASS、`life-cycle cost`（3 套算稿 × 5 sheets）PASS。
 
 ## 第二个 bug 更贵：把输入当成了交付件
 

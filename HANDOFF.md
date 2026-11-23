@@ -4,6 +4,8 @@
 > 本文件是**当前唯一的状态基准**。`README.md` 里的「runs the dev set」与「三项指标都在 29 道真实 dev 题上量过」是上一版设计稿的措辞：**指标来自对 baseline artifacts 的离线静态回归，不是本 harness 跑过 dev set**。以本文和 `GOAL.md` 为准。
 >
 > **执行环境约束（2026-11-23 追加）**：本机没有本地模型，只能用**云端模型 API + 云端 Coding Agent**。据此新增 **§11 纯云端方案**；§5 的阻塞项与 §7 的本机 WSL 假设已按该约束修订。**官方路线本来就是云端模型，不需要本地模型**——详见 §11.1。
+>
+> **F-01 合规清理（2026-11-23 追加）**：**P0-5 已完成** —— 运行时题面指纹已清除、baseline 反推数据已移出参赛仓库，静态自检 **8/8 PASS**（含官方 29 个 dev task id 精确比对），`criteria.py` GATE-A **6/6**。处置清单与提交前剩余人工项见 `docs/02-合规说明.md`。
 
 ---
 
@@ -16,10 +18,11 @@
 | 真模型端到端 | ❌ **从未跑过**（Anthropic 原生路径只做过编译级验证） |
 | `artifacts/` | ❌ **目录不存在**，必须由 `eval/run.py` 生成，禁止手写 |
 | dev 分数 | **0**（不是分数低，是没有产物） |
+| F-01 合规 | ✅ **已清理**：运行时指纹、baseline 反推数据已处置，静态自检 8/8（`docs/02-合规说明.md`） |
 | 距截止 | 2027-01-05 23:59:59，约 43 天 |
 | 当前最该做 | 选一台**能跑 Docker 的云主机** → 跑 `cloud-preflight.sh` → 起云端模型代理 → `kit check` 打掉判 0 门槛 → 再上 dev set（§11） |
 
-一句话：**设计完成度约 90%，工程验证完成度约 30%，提交完成度 0%。不要现在提交。**
+一句话：**设计完成度约 90%，F-01 静态合规已完成，工程验证完成度约 30%，提交完成度 0%。不要现在提交。**
 
 ---
 
@@ -52,7 +55,10 @@ Kaggle 只提供 `NOTE.md`（「no provided dataset」）。**dev 题面与 grad
 | `17408a5` | v1 主体：spec-first harness（specgen / router / guard / transport / model / skills / dryrun / criteria） |
 | `a58b197` | 5 篇 writeups |
 | `084a58b` | **修复提交**（详见 `docs/01-修复与验证记录.md`） |
-| `05f90e3` | 文档提交：`HANDOFF.md` / `docs/` / `devtools/` / README 状态说明（已推送） |
+| `05f90e3` | 文档提交：`HANDOFF.md` / `docs/` / `devtools/` / README 状态说明 |
+| `b7fcc14` | 文档修订：记录交接提交号 |
+| `990bf5f` | 纯云端方案：HANDOFF §11、`cloud-preflight.sh`、`litellm-selfhosted.yaml.example`、运行脚本泛化 |
+| **本轮提交** | **F-01 合规清理**：5 个 SKILL.md 去 `covers:` 与题面指纹、`router.path_hint()` 降权、移出 `PLE_domain_skeleton.md` / `skeleton2.json` / `_build/`、新增 `devtools/f01_check.py` 与 `docs/02-合规说明.md`、`criteria.py` 外部化数据源与新增 G-12、writeups 中性化 |
 
 `084a58b` 修掉的 5 个问题：
 1. `serve.py`：`ping_interval=20, ping_timeout=60` → **`ping_interval=None`**。官方 `docs/protocol.md` 明确要求关闭 keepalive（单条 `exec` 上限 600 s，长命令期间心跳会判断连、该题直接算 harness 失败）。这是原项目最高优先级的判 0 风险。
@@ -65,9 +71,11 @@ Kaggle 只提供 `NOTE.md`（「no provided dataset」）。**dev 题面与 grad
 
 ```
 Windows  python dryrun.py     → exit 0（守卫拒绝 → 修复 → 放行闭环）
-Windows  python criteria.py   → GATE-A PASS 5/5；GATE-B 如实标 BLOCKED/OPEN，退出码 2
+Windows  python criteria.py   → GATE-A PASS 6/6（含 G-12）；GATE-D/B 如实标 BLOCKED/OPEN，退出码 2
 Linux 容器（内核 microsoft-standard-WSL2）→ dryrun / criteria 同样通过，行尾全 LF
 python devtools/protocol_smoke.py → 真实 WebSocket 往返 task → exec/write_file → done，PASS
+python devtools/f01_check.py --dev-set <official eval/dev_set.yaml> → F-01 静态合规 PASS 8/8
+                                     （29 个 dev task id 精确比对，runtime 中 0 命中）
 git status → 干净；无 API key / private key 泄漏（git grep 已扫）
 ```
 
@@ -75,13 +83,16 @@ git status → 干净；无 API key / private key 泄漏（git grep 已扫）
 
 | 文件 | 用途 |
 |---|---|
-| `docs/00-接手评估.md` | 接手时的完整现状评估（风险清单 P0/P1/P2、合规性核对、命令清单） |
+| `docs/00-接手评估.md` | 接手时的完整现状评估（**历史快照**，状态以本文件为准；风险清单 P0/P1/P2、合规性核对、命令清单） |
 | `docs/01-修复与验证记录.md` | 修复前后对比、验证命令与输出结论、环境实测事实 |
+| `docs/02-合规说明.md` | **F-01 / F-02 合规说明**：规则边界、运行时文件白名单、本次清理清单、提交前人工项 |
 | `devtools/wsl-run.sh` | 通用 Linux 一键脚本（文件名沿用）：`env` / `gcp` / `hf` / `check` / `dev` / `ready`；WSL2 与云主机都能用 |
 | `devtools/cloud-preflight.sh` | **云端环境探测**：Docker daemon、CPU/内存/磁盘、网络、工具链，输出逐项结论 |
+| `devtools/f01_check.py` | **F-01 静态合规自检**（8 项；`--dev-set` 可做 29 个 task id 精确比对），已接入 `criteria.py` G-12 |
 | `devtools/litellm-selfhosted.yaml.example` | 自有云端 API key 的 LiteLLM 代理配置样例（B 档，见 §11.2） |
 | `devtools/protocol_smoke.py` | 不需要模型和 Docker 的 WebSocket 协议冒烟 |
 | `_ple_meta/ple-official`（工作区，**不在仓库内**） | 官方 kit 本地克隆，供离线查文档 |
+| `_ple_meta/f01-backup-20261123/`（工作区，**不在仓库内**） | 被移出/改写的 baseline 反推数据原件备份，仅供追溯，**不要入库** |
 
 > 官方 `kit/build.py` import `fcntl` → **Windows Python 跑不了 kit**；`docker build` 用路径 context → Docker-in-Docker 也不成立。所以官方链路**必须在能跑 Docker daemon 的 Linux 文件系统里执行**（`eval/README.md` Platform notes）。这不一定是本机 WSL2 —— **一台云主机同样满足，且能绕开本机全部阻塞**（§11）。Windows 侧只能做离线自测。
 
@@ -95,7 +106,8 @@ git status → 干净；无 API key / private key 泄漏（git grep 已扫）
 | `kit check` 未跑 | build / listen / smoke / cancel 任一失败即**终止该次机会**，且会烧掉 3 次之一 | M1 |
 | 真模型端到端未验证 | `skillkit/model.py` 的 Anthropic 原生 `tool_use` / `tool_result` 序列化、`cache_control` 只做编译级验证 | T-03 |
 | dev set 29 题未跑 | 无分数、无 `manifest.json`、无法 readiness | M2 |
-| F-01 合规复核未完成 | 见 §6，有**新发现** | P0 |
+| F-01 静态合规 | ✅ **已完成**：`f01_check.py` 8/8、GATE-A 6/6。剩余为**提交前人工项**：复核运行日志、把仓库重建为单个 commit 清除历史里的 reference 数据（`docs/02-合规说明.md` §6） | P0 |
+| git 历史残留 | 早期提交 `17408a5` / `a58b197` 曾含 baseline 反推数据；当前 HEAD 已删除，但历史 tree 仍在。官方要求「单个 commit」→ 最终应重建历史 | P1，提交前 |
 | 本机 Docker 只有 8 CPU / 8.3 GiB | 全量 dev set 可能 OOM（官方要求 ≥16.25 GiB）；**改用云主机即可解除** | 环境 |
 | 云端执行环境未选定 / 未探测 | 决定 `kit check` 与 `eval/run.py` 能否跑起来；多数纯沙箱 Coding Agent **没有 Docker daemon** | P0，见 §11.3 |
 
@@ -111,7 +123,7 @@ git status → 干净；无 API key / private key 泄漏（git grep 已扫）
 | P0-2 | 云端 Docker 资源达标：≥6 CPU、**≥16.25 GiB RAM**、≈10 GB 空闲磁盘、`linux/amd64` | `docker info` 输出的内存 ≥16 GiB；`docker run --rm hello-world` 成功 |
 | P0-3 | 拿到 HF gated 数据集授权 + read token | `devtools/wsl-run.sh hf` 返回 `HTTP 200` |
 | P0-4 | 起**云端模型代理**：A 档 Vertex AI（GCP + ADC）或 B 档自有云端 key 经 LiteLLM（§11.2 二选一） | `/health/liveliness` 200，且 `POST /v1/messages` 对 `claude-opus-5-5` 返回 200 |
-| P0-5 | **F-01 清理（新发现，优先级上调）**：`router.py` 运行时会把各 `skills/*/SKILL.md` 开头内容读进 system prompt，而 frontmatter `covers:` 直接列了 dev task id，等于把题面指纹喂给模型；`PLE_domain_skeleton.md` 还含 baseline 的具体结论数值 | 删掉 5 个 SKILL.md 的 `covers:` task id 列表，只保留领域格式惯例；把 skeleton 中的具体数值移出仓库或明确标注为格式样本；复核 `router.path_hint()` 的工作量路径家族 +9 权重 |
+| P0-5 | ✅ **F-01 清理已完成（本轮）**：5 个 SKILL.md 去 `covers:` 与题面指纹；移出 `PLE_domain_skeleton.md` / `skeleton2.json` / `_build/`；`router.path_hint()` `+9 → +4`；`criteria.py` 外部化数据源；新增 G-12 与 `f01_check.py`；writeups 中性化 | 已达成：`python devtools/f01_check.py --dev-set <official dev_set.yaml>` → **PASS 8/8**，`criteria.py` **GATE-A 6/6**。详见 `docs/02-合规说明.md` |
 | P0-6 | `kit check`（先跳过 smoke 打掉门槛，再跑全量） | 全量检查末行出现 **`ready to submit`** |
 | P0-7 | 真模型跑 1~2 题，验 Anthropic 路径并校准「第 10~20 步落第一版」 | `runs/<run>/attempt1/harbor.log` 无 400/序列化异常，`results.json` 有分 |
 
@@ -150,7 +162,7 @@ git status → 干净；无 API key / private key 泄漏（git grep 已扫）
 
 ## 6. 规则红线（提交前逐条打勾）
 
-- [ ] **F-01**：不硬编码答案、不检测特定 task 来分支、harness 不读取 dev graders / reference files，也不在 build/run 时读取自己的 `artifacts/`。当前灰区见 P0-5。
+- [x] **F-01 静态部分**：不硬编码答案、不检测特定 task 来分支、harness 不读取 dev graders / reference files，也不在 build/run 时读取自己的 `artifacts/`。本轮已清理，`f01_check.py` 8/8、G-12 PASS；**提交前仍需人工复核运行日志与最终 commit**（`docs/02-合规说明.md` §6）。
 - [ ] **F-02**：`artifacts/` 必须由 `eval/run.py` 从**所提交的 harness**、用 `submission.yaml` 声明的 `model_api` 跑出；禁止手改、禁止别的模型/别的 harness 产出。
 - [ ] `submission.yaml` 的 `model_api` 必须与实际调用一致（违反即失格）；**为了接自有云端 key 而改成 `anthropic/<model>` / `openai/<model>` 等于放弃提交资格**，代理可换、`model_api` 不可换（§11.4）。
 - [ ] **Coding Agent 只做开发 / 运维 / 提交代码，不能代替 harness 做题或生成 artifacts**（§11.4）。
@@ -202,8 +214,10 @@ Windows 侧随时可跑（不需要 Docker / key）：
 
 ```bash
 python dryrun.py
-python criteria.py                       # 缺 29 题数据时应报 BLOCKED，不是 PASS
+python criteria.py                       # GATE-A 6/6；缺 29 题数据时 GATE-D 报 BLOCKED，不是 PASS
 python devtools/protocol_smoke.py        # 真实 WebSocket 往返
+python devtools/f01_check.py             # F-01 静态合规自检（7 硬检查 + 1 SKIP）
+python devtools/f01_check.py --dev-set <官方 eval/dev_set.yaml>   # 8/8，含 29 个 task id 精确比对
 ```
 
 `eval/run.py` 的 judge 优先级：`JUDGE_BASE_URL`+`JUDGE_API_KEY` → `MODEL_PROXY_URL`+`MODEL_PROXY_KEY`（本项目走这条）→ 自有模型 key；`JUDGE_MODEL` 默认 `claude-opus-5-5`，judge 任务会请求 **`<model>-judge`**，所以自制代理必须同时 serve `claude-opus-5-5-judge`（§11.2）。proxy 必须 bind `0.0.0.0`，否则 Linux 上 Docker bridge 连不到 `127.0.0.1`。
@@ -213,14 +227,16 @@ python devtools/protocol_smoke.py        # 真实 WebSocket 往返
 ## 8. 定义完成（DoD）
 
 ```
+[x] P0-5 F-01 静态清理已完成并复核（f01_check.py 8/8、GATE-A 6/6）
 [ ] cloud-preflight.sh 全绿：Docker daemon / ≥16.25 GiB / 网络 / 工具链
 [ ] 模型代理就绪：/health/liveliness 200，/v1/messages 对 claude-opus-5-5 返回 200
-[ ] P0-5 F-01 清理已完成并复核
 [ ] wsl-run.sh check 全绿：build / listen / smoke / mcp / cancel 全过
 [ ] 真模型 1~2 题成功（Anthropic 原生路径无 400 / 无序列化异常）
 [ ] artifacts/ 覆盖 29 题、由 eval/run.py 导出、manifest.json 有分数
 [ ] eval/run.py --artifacts 重判通过；kit artifacts 通过
 [ ] 代码 + artifacts/ 同一 commit，git status 干净，无 key，LF + 0755 正确
+[ ] 仓库重建为单个 commit：git 历史中不再含 baseline 反推数据（docs/02-合规说明.md §6）
+[ ] 提交前人工复核运行日志：harness 未读取 artifacts/ 或 graders
 [ ] 全量 kit check 末行 "ready to submit"
 [ ] 仓库已推送 GitHub，匿名 clone 可拉取
 [ ] 若走 B 档，提交前已用 A 档重跑 artifacts 或已向比赛方确认
@@ -248,9 +264,9 @@ python devtools/protocol_smoke.py        # 真实 WebSocket 往返
 
 - **模型通道选 A 还是 B？**（§11.2）A 需 GCP 项目 + 结算但零争议；B 只需一个云端 API key，但产物通道存在评审疑义。
 - **云端 Coding Agent 具体是哪种环境？** 关键只看一件事：**能否跑 Docker daemon**（§11.3 选型表）。若无 Docker，只能让它改代码，eval 要交给另一台机器。
-- 最终提交仓库是否就直接用本仓库？官方要求「匿名可克隆的单个 commit」，本仓库为 public，符合；但 `docs/`（含 baseline 数值）与 `devtools/` 是工程笔记，**正式提交前建议精简或加合规说明**。
+- 最终提交仓库是否就直接用本仓库？官方要求「匿名可克隆的单个 commit」，本仓库为 public，符合。`docs/` / `devtools/` 是工程笔记，已在 `docs/02-合规说明.md` 声明**不参与 runtime**；但**早期 git 提交里曾含 baseline 反推数据，当前 HEAD 已删除、历史 tree 仍在** —— 稳妥做法是从清理后的 tree 重建为单个全新 commit（或 squash 后 force push），否则仍建议精简/重建。
 - 比赛站点的**具体提交方式官方尚未公布**，需持续关注 `ple-bench.com`。
-- `ple-template`（原 Linux 环境的 29 题题面 + baseline artifacts）**不在本次解压包里**；README 的 25/29、23/29、17 PASS/2 WARN/5 FAIL 因此在本机无法复现。`criteria.py --template` 默认仍指向 `/home/user/work/ple-template`，有数据时应显式传路径。
+- `ple-template`（原 Linux 环境的 29 题题面 + baseline artifacts）**不在本次解压包里**；README 的 25/29、23/29、17 PASS/2 WARN/5 FAIL 因此在本机无法复现。本轮已把 `criteria.py --template` 默认值改为**空**、并新增 `--truth`（也可用 `PLE_TEMPLATE` / `PLE_TRUTH` 环境变量），仓库内不再内置任何 reference 路径；有数据时显式传外部路径。
 - 若 HF 网络始终不通，退路是预先下载任务目录后用 `eval/run.py --tasks-dir DIR`。
 - 环境就绪后**优先跑 `check` 而不是 `dev`**；顺序反了会在没验证 build 的情况下白烧几小时机时。
 
@@ -337,6 +353,8 @@ curl -s -H "Authorization: Bearer $MODEL_PROXY_KEY" \
 ## 附：不要做的事
 
 - 不要手工创建或编辑 `artifacts/` 里任何文件（F-02 直接失格）。
+- 不要把 `PLE_domain_skeleton.md` / `skeleton2.json` / `_build/` 加回参赛仓库，也不要在 SKILL.md 里重写 `covers:` 或具体题目的取值、文号、人名、日期（`docs/02-合规说明.md`）。
+- 不要把 `_ple_meta/f01-backup-20261123/` 备份目录放进任何仓库或推送到 GitHub。
 - 不要让云端 Coding Agent 代替 harness 做题或生成产物（§11.4）。
 - 不要把 `submission.yaml` 的 `model_api` 改成 `anthropic/` / `openai/` / `openai-compatible/` 以接自有 key（会永久失去提交资格）；代理可换、声明不能换。
 - 不要在改完 harness 后沿用旧 artifacts。

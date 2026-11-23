@@ -58,7 +58,7 @@ Physical-Engineering's Last Exam（PLE），Google 赞助，2026-11-09 → 2027-
 
 最后一个数字值得单独说。我拿 baseline 已经产出的交付物去喂我的守卫，19 个通过，5 个不过。
 其中 4 个是 baseline 把东西放在了和题面不同的位置——这说明守卫在抓真问题。
-第 5 个更有意思：`frame-extension-method` 的题面用 `### N. \`file\`` 列了 7 个文件，
+第 5 个更有意思：`一道结构工序题` 的题面用 `### N. \`file\`` 列了 7 个文件，
 baseline 的 zip 里只有 6 个，少的那个是 `instruction_to_engineer.md`。
 
 **一个已经跑完、看起来交了活的 agent，漏了题面明确要求的一个文件。** 没有人会发现，除了守卫。

@@ -7,3 +7,9 @@ venv/
 runs/
 *.log
 .DS_Store
+
+# F-01: baseline-derived data was removed from this entry and must not return.
+# Backups live outside the repo (workspace _ple_meta/f01-backup-20261123/).
+PLE_domain_skeleton.md
+skeleton2.json
+_build/

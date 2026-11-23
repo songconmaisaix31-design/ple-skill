@@ -20,7 +20,7 @@ circuit,description,from,to,install_class,length_ft,...
 ```
 ```
 
-这种可以精确抽。`lv-cable-sizing` 的 `wire_schedule.csv` 我抽到 27 列，和 baseline 实际产出
+这种可以精确抽。`一道电缆选型题` 的 `wire_schedule.csv` 我抽到 27 列，和 baseline 实际产出
 的 28 列只差一列（`drop_v` 在表尾，题面里写作计算列）。够用。
 
 **B 类（短，<2000 字符）** —— 真正的交付要求写在 `task.md` 里，instruction 只有一句自然语言：
@@ -79,12 +79,12 @@ Save the files that make up your answer under `output/` in this workspace,
 ```
 
 这类我加了 `mode="dir"`，`deliverable="output/"`，守卫改成"目录非空 + 内部 docx/xlsx 可解析"。
-`fire-test-validation-memo` 和 `landscape-sheet-revision` 就是这么解出来的。
+`一道试验验证题` 和 `一道景观图则题` 就是这么解出来的。
 
 ## 剩下的 4 道
 
-`data-hall-mep-routing-offset`、`footing-settlement-verification`、`solar-supplemental-review`、
-`solar-witness-test-package` —— 题面里完全没有路径，只有内容要求。
+`一道机房布线题`、`一道基础验算题`、`一道光伏复核题`、
+`一道光伏见证题` —— 题面里完全没有路径，只有内容要求。
 
 我的处理不是猜一个文件名，而是**标 `confidence=low` 交给运行时**：
 

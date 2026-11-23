@@ -1,7 +1,7 @@
 ---
 name: ple-mep
 domain: mep
-covers: cooling-water-flush-plan, data-hall-mep-routing, data-hall-mep-routing-offset, heat-rejection-life-cycle-cost
+scope: 机械 / 机电 / 冷却水类 MOP 程序包、几何布线程序与寿命周期成本交付包
 ---
 
 # 机械 / 机电 / 冷却水
@@ -14,21 +14,21 @@ covers: cooling-water-flush-plan, data-hall-mep-routing, data-hall-mep-routing-o
 | **几何布线程序** | "route the overhead MEP" / clash-free / from the drawing set | `output/solution.py`（单个可执行程序） |
 | **寿命周期成本** | life cycle cost / replacement / alternatives | `.zip`（多套算稿 + dxf + 台账 + basis） |
 
-**注意**：布线型交付的是**代码**，不是文档。grader 会跑它。所以这题的正确产出是"读图纸 → 建几何 → 布线 → 输出结构化结果"的程序，不是一份说明。
+**注意**：布线型交付的是**代码**，不是文档。评分会运行它。所以这类题的正确产出是"读图纸 → 建几何 → 布线 → 输出结构化结果"的程序，不是一份说明。
 
 ## 工作法
 
-1. **版本冲突先解决**。MEP 题几乎都有"superseded 版本"陷阱（如 Rev A 把管线归 C4，Rev C 归 C5）。`design_basis.md` / `MOP.md` 第 2 节必须写明"以哪一版为准、为什么"。
+1. **版本冲突先解决**。这类题常有 "superseded 版本"陷阱；`design_basis.md` / `MOP.md` 第 2 节必须写明"以哪一版为准、为什么"及对工作范围的连锁影响。
 2. **回路先定义，再算流量**。所有计算按 `circuit_id` 分桶，不允许跨回路合并。
 3. **水力算三项**：流速、雷诺数、所需扬程 vs 可用扬程。三个都要进表，缺一个就没法核验。
 4. **程序型题先跑通再优化**。solution.py 第 1 版要能 import 无错、能在样例输入上输出合法结构，再谈避让质量。
 
-## 必需件与列头
+## 必需件与列头（通用格式惯例）
 
 ### MOP 程序包
 `MOP.md` + `flush_plan.csv` + `chemistry_plan.csv` + `acceptance_matrix.csv` + `schedule.csv` + `constraint_register.csv` + `resources.json`
 
-| 文件 | 列头（照抄） |
+| 文件 | 列头（照题面要求调整） |
 |---|---|
 | `flush_plan.csv` | `circuit_id,stage,skid_id,skids_parallel,flow_gpm,governing_segment,governing_id_in,velocity_fps,reynolds,required_head_ft,skid_head_avail_ft,duration_h` |
 | `chemistry_plan.csv` | `circuit_id,stage,program,product_id,active_species,target_ppm,basis_volume_gal,product_quantity,product_unit,packages,ph_target_lo,ph_target_hi,hold_days,source` |
@@ -56,7 +56,7 @@ covers: cooling-water-flush-plan, data-hall-mep-routing, data-hall-mep-routing-o
 - 不要求 UI，不要求注释成文；要求**能跑、结果可解析**
 
 ### 寿命周期成本
-每套 plant 一份 `*_CALC_*.xlsx`，工作表组固定：
+每个 plant 一份 `*_CALC_*.xlsx`，常见工作表组：
 ```
 DesignPoint / OffDesign / WaterBalance / Energy / LifeCycleCost
 ```
@@ -77,6 +77,6 @@ DesignPoint / OffDesign / WaterBalance / Energy / LifeCycleCost
 
 - 用 superseded 版图纸算 → 全部回路错位，连锁失分
 - 只给最终流量，不给 governing segment 和雷诺数
-- 多 plant 题只做一套算稿（三套是题面要求，漏一套丢三分之一）
-- solution.py 靠硬编码题面坐标过关 → 违反反作弊
+- 多 plant 题只做一套算稿（按题面要求的数量逐套给出）
+- solution.py 靠硬编码题面坐标过关 → 违反反作弊条款
 - chemistry_plan 的 `basis_volume_gal` 没跟 flush_plan 的体积对上
