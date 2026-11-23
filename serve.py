@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """PLE harness entry point: one WebSocket connection = one task."""
-import asyncio, json, os, sys, time
+import asyncio, json, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import websockets
+from websockets.exceptions import ConnectionClosed
 from skillkit.harness import Harness
 from skillkit.transport import WSTransport
 from skillkit.model import from_env
@@ -16,16 +17,24 @@ async def solve(ws):
         await ws.send(json.dumps({"type": "error", "message": "expected task frame"}))
         return
     limits = first.get("limits") or {}
-    timeout = int(limits.get("agent_timeout_sec", 21600))
+    timeout = limits.get("agent_timeout_sec", 21600)
     workdir = first.get("workdir") or "/app"
+    transport = WSTransport(ws, workdir)
+    pending_frames = set()
+
+    async def send(frame):
+        try:
+            await ws.send(json.dumps(frame))
+        except ConnectionClosed:
+            pass
+
+    def emit(frame):
+        task = asyncio.create_task(send(frame))
+        pending_frames.add(task)
+        task.add_done_callback(pending_frames.discard)
 
     def log(text):
-        try:
-            return asyncio.create_task(ws.send(json.dumps({"type": "log", "text": str(text)[:2000]})))
-        except Exception:
-            return None
-
-    transport = WSTransport(ws, workdir, log=lambda t: None)
+        emit({"type": "log", "text": str(text)[:2000]})
 
     # reader: results go to pending futures, cancel raises the flag
     async def reader():
@@ -36,43 +45,41 @@ async def solve(ws):
                 except json.JSONDecodeError:
                     continue
                 await transport.dispatch(msg)
-        except Exception:
-            pass
+        finally:
+            transport.cancelled.set()
 
-    reader_task = asyncio.create_task(reader())
     model = from_env()
     h = Harness(transport, model, first.get("instruction", ""), workdir=workdir,
-                limits=limits, mcp_servers=first.get("mcp_servers") or [],
-                log=lambda t: asyncio.create_task(
-                    ws.send(json.dumps({"type": "log", "text": str(t)[:2000]}))))
+                limits=limits, mcp_servers=first.get("mcp_servers") or [], log=log)
 
     def on_usage(u):
-        asyncio.create_task(ws.send(json.dumps({
+        emit({
             "type": "usage", "model": model.model,
             "input_tokens": u.get("input_tokens", 0),
             "output_tokens": u.get("output_tokens", 0),
-            "cache_read_tokens": u.get("cache_read_tokens", 0)})))
+            "cache_read_tokens": u.get("cache_read_tokens", 0)})
 
+    reader_task = asyncio.create_task(reader())
     run_task = asyncio.create_task(h.run(timeout, on_usage=on_usage))
     cancel_watch = asyncio.create_task(transport.cancelled.wait())
-    done, _ = await asyncio.wait({run_task, cancel_watch}, return_when=asyncio.FIRST_COMPLETED)
-    if cancel_watch in done and not run_task.done():
-        run_task.cancel()
-        final = "Cancelled at the time limit. Files already on disk are the deliverable."
-    else:
-        try:
-            final = run_task.result()
-        except Exception as e:
-            final = f"Harness error: {e}"
-    cancel_watch.cancel()
-    reader_task.cancel()
-
     try:
-        await ws.send(json.dumps({"type": "log", "text": f"steps={h.steps} "
-                                 f"deliverable={h.spec.get('deliverable')}"}))
-        await ws.send(json.dumps({"type": "done", "final_message": (final or "")[:20000]}))
-    except Exception:
-        pass
+        await asyncio.wait({run_task, cancel_watch}, return_when=asyncio.FIRST_COMPLETED)
+        if run_task.done():
+            final = run_task.result()
+        else:
+            final = h.final or "Cancelled at the time limit. Review the files already written."
+        terminal = {"type": "done", "final_message": final[:20000]}
+    except Exception as e:
+        terminal = {"type": "error", "message": f"Harness error: {e}"[:2000]}
+    finally:
+        for task in (run_task, cancel_watch, reader_task):
+            task.cancel()
+        await asyncio.gather(run_task, cancel_watch, reader_task, return_exceptions=True)
+
+    if pending_frames:
+        await asyncio.gather(*pending_frames)
+    await send({"type": "log", "text": f"steps={h.steps} deliverable={h.spec.get('deliverable')}"})
+    await send(terminal)
 
 
 async def main():

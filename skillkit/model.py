@@ -72,26 +72,24 @@ class ModelClient:
         for m in messages:
             role = m["role"]
             if role == "assistant":
-                blocks = []
-                if m.get("content"):
-                    blocks.append({"type": "text", "text": m["content"]})
-                for tc in m.get("tool_calls") or []:
-                    blocks.append({"type": "tool_use", "id": tc["id"], "name": tc["name"],
-                                   "input": tc.get("arguments") or {}})
-                out.append({"role": "assistant", "content": blocks or [{"type": "text", "text": "(ok)"}]})
-            elif role == "tool":
-                out.append({"role": "user", "content": [
-                    {"type": "tool_result", "tool_use_id": m["tool_call_id"],
-                     "content": m.get("content") or ""}]})
+                # Claude expects its thinking blocks and their signatures intact
+                # when a tool result continues this turn.
+                blocks = m.get("anthropic_content") or [{"type": "text", "text": "(ok)"}]
+                out.append({"role": "assistant", "content": blocks})
+                continue
+
+            if role == "tool":
+                block = {"type": "tool_result", "tool_use_id": m["tool_call_id"],
+                         "content": m.get("content") or ""}
             else:
-                out.append({"role": "user", "content": [{"type": "text", "text": m.get("content") or ""}]})
-        # cache the newest message: the only growing part below the system prompt
+                block = {"type": "text", "text": m.get("content") or ""}
+            if not out or out[-1]["role"] != "user":
+                out.append({"role": "user", "content": []})
+            out[-1]["content"].append(block)
+
+        # Cache the newest input, after the tool results and any follow-up text.
         if out and out[-1]["role"] == "user" and out[-1]["content"]:
-            last = out[-1]["content"][-1]
-            if last.get("type") == "text":
-                last["cache_control"] = {"type": "ephemeral"}
-            elif last.get("type") == "tool_result":
-                last["cache_control"] = {"type": "ephemeral"}
+            out[-1]["content"][-1]["cache_control"] = {"type": "ephemeral"}
         return out
 
     def _to_openai(self, messages):
@@ -143,7 +141,7 @@ class ModelClient:
         last_err = None
         for attempt in range(5):
             try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(600, connect=30),
+                async with httpx.AsyncClient(timeout=httpx.Timeout(1800, connect=30),
                                              trust_env=True) as c:
                     r = await c.post(url, headers=headers, json=body)
                     if r.status_code in (429, 500, 502, 503, 504):
@@ -167,9 +165,11 @@ class ModelClient:
             calls = [{"id": b["id"], "name": b["name"], "arguments": b.get("input") or {}}
                      for b in blocks if b.get("type") == "tool_use"]
             u = data.get("usage") or {}
-            usage = {"input_tokens": u.get("input_tokens", 0),
+            cache_read = u.get("cache_read_input_tokens", 0) or 0
+            cache_write = u.get("cache_creation_input_tokens", 0) or 0
+            usage = {"input_tokens": (u.get("input_tokens", 0) or 0) + cache_write + cache_read,
                      "output_tokens": u.get("output_tokens", 0),
-                     "cache_read_tokens": u.get("cache_read_input_tokens", 0)}
+                     "cache_read_tokens": cache_read}
         else:
             ch = (data.get("choices") or [{}])[0].get("message") or {}
             text = ch.get("content") or ""
@@ -188,7 +188,10 @@ class ModelClient:
                      "cache_read_tokens": (u.get("prompt_tokens_details") or {}).get("cached_tokens", 0)}
         for k in self.usage:
             self.usage[k] += usage.get(k, 0)
-        return {"content": text, "tool_calls": calls, "usage": usage}
+        result = {"content": text, "tool_calls": calls, "usage": usage}
+        if self.mode == "anthropic":
+            result["anthropic_content"] = blocks
+        return result
 
 
 def from_env(log=None):
