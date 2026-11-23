@@ -1,0 +1,195 @@
+{
+  "id": "repair-source-v1",
+  "frozen_date_Asia_Shanghai": "2026-11-24",
+  "question": "Does adding the failing Python source lines to an existing repair message improve normalized score at 395 seconds on two fresh synthetic scheduling cases?",
+  "split": {
+    "development": [
+      "a",
+      "b",
+      "c",
+      "d",
+      "e"
+    ],
+    "holdout": [
+      "f",
+      "g"
+    ],
+    "training": [],
+    "unit": "An input instance from one synthetic storage-scheduling family. Identical task instructions are intentional.",
+    "selection": "A/B/C informed the first-action policy; the earlier D/E replication informed this source-feedback hypothesis. All five are development data. Freeze F/G before model runs; include all preassigned F/G trials regardless of exposure. After scoring, F/G are development data for future changes.",
+    "cases": {
+      "a": {
+        "split": "development",
+        "sha256": {
+          "input/periods.csv": "41ace2ec226673c66acd7d995ebf29f3dd4ba9b6d37dd144fdda4b37600ad717",
+          "input/site.json": "03dd97a11de9d22f0b6cc2536ce0f9153ede29e5673ca461edc0e5884636a4de",
+          "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475"
+        }
+      },
+      "b": {
+        "split": "development",
+        "sha256": {
+          "input/periods.csv": "e861924298648a9d069c8b1350c118b06d429a4babb5a2fe9ee8d6dfdf5e89de",
+          "input/site.json": "71b60e11a28619b4936aff485ec5e3fb10a7f81cd88c3a6cf8d209d9dd388a6a",
+          "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475"
+        }
+      },
+      "c": {
+        "split": "development",
+        "sha256": {
+          "input/periods.csv": "d0055120622d84c722d77c97b04d7e9e10bcf754a94184e11b10a689926e5f8a",
+          "input/site.json": "81889012e6759f994e9f9560e4acf55343959dabc62c49da8dab51a951057424",
+          "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475"
+        }
+      },
+      "d": {
+        "split": "development",
+        "sha256": {
+          "input/periods.csv": "66991d7ec54491dd75f1fa36f47d55885575ba507821ffe1828dc35eb8fdc699",
+          "input/site.json": "85070d73c54d750714a66646fea45c32e5fcbd4b2e7c6b9c3e9f1001694f1e47",
+          "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475"
+        }
+      },
+      "e": {
+        "split": "development",
+        "sha256": {
+          "input/periods.csv": "a196362b08772a3c559e99e740079d4330cc758e23f38385b882bb60bd1fc65a",
+          "input/site.json": "3347512fbb17c2407594f3b064b5e9bc119d963c0d110e68899d169ba7c157f8",
+          "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475"
+        }
+      },
+      "f": {
+        "split": "holdout",
+        "sha256": {
+          "input/periods.csv": "c421e6b9a8846dc1372c06e02739b2f0c0cb58ef616c7131863da1eaf798d71e",
+          "input/site.json": "87b9a7cf722696ccaee121445bc5221a4242da84b01becf89f739d5cf2036e08",
+          "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475"
+        }
+      },
+      "g": {
+        "split": "holdout",
+        "sha256": {
+          "input/periods.csv": "a6743cfa4373b2cc52570443e95559ae45478a38a8690aeefe7d5828ec8c15dd",
+          "input/site.json": "bd68473c60aa36209a234919ce20f70417bd0f2427e5431550f985abcf4d5208",
+          "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475"
+        }
+      }
+    }
+  },
+  "arms": {
+    "text": "PLE_CODE_ACTION=text; existing exception/traceback repair feedback, source excerpt disabled.",
+    "text-source": "Same PLE_CODE_ACTION=text; PLE_REPAIR_CONTEXT=source enables the excerpt.",
+    "factor": "When a nonzero first Python exit has a reliably located innermost traceback line in the submitted program, append that line and up to two neighbors on each side, with line numbers, bounded to 800 characters. Otherwise retain baseline behavior. No other prompt, interface, tools, model, time limit or grader changes."
+  },
+  "design": {
+    "seeds": [
+      17
+    ],
+    "repetition_ids": [
+      1,
+      2,
+      3
+    ],
+    "pairing": [
+      "variant",
+      "repetition"
+    ],
+    "pairs": 6,
+    "arms_per_pair": 2,
+    "first_arm": {
+      "f": {
+        "1": "text",
+        "2": "text-source",
+        "3": "text"
+      },
+      "g": {
+        "1": "text-source",
+        "2": "text",
+        "3": "text-source"
+      }
+    },
+    "execution": "One GitHub-hosted runner per pair. Use separate task containers and model-server processes, reset KV state, repeat the identical function-call warm-up. The downloaded GGUF/binaries may be reused within a pair.",
+    "interpretation": "Repeated executions at one fixed seed and zero temperature measure repeatability across runners; they do not sample decoding seeds or independent task families."
+  },
+  "fixed_settings": {
+    "model": "unsloth/gemma-4-26B-A4B-it-GGUF",
+    "model_revision": "c099eb48e663fd284577b04978a94ffccb261841",
+    "gguf": "gemma-4-26B-A4B-it-UD-IQ2_XXS.gguf",
+    "gguf_sha256": "52f98e6fc6df62438dff8f57ac049f60b4c36acf93786b6aeeedc129acc02343",
+    "llama_cpp_build": "b12651",
+    "llama_cpp_linux_archive_sha256": "17b242259181d5b1b1f7719aba27929700a8b0dab39bfaef1b971a992b397b38",
+    "official_kit_commit": "8320f0402fdca9f42476607f72bcfd5271cd50c9",
+    "task_image": "python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b",
+    "runner": "ubuntu-24.04",
+    "model_cpu_threads": "min(nproc, 4)",
+    "gpu_layers": 0,
+    "parallel_slots": 1,
+    "model_context_tokens": 8192,
+    "reasoning": "off",
+    "temperature": 0,
+    "seed": 17,
+    "task_cpu_quota": 1,
+    "task_memory_mib": 256,
+    "declared_budget_seconds": 720,
+    "external_checkpoint_seconds": 395,
+    "normal_per_request_token_cap": 8000,
+    "text_first_action": {
+      "generation_token_cap": 1600,
+      "inference_seconds_cap": 390,
+      "fraction_of_remaining_work_time": 0.68,
+      "execution_seconds_cap": 30,
+      "guard_seconds_cap": 10
+    }
+  },
+  "metrics": {
+    "primary": "Independent grade.score at external 395-second cutoff. Score equals reference optimal cost divided by independently recomputed feasible cost. Invalid or absent deliverables score zero.",
+    "secondary": [
+      "grade.feasible",
+      "grade.optimal",
+      "Candidate repair exposure count and completed file count, with the preassigned 6 trials per arm as denominator.",
+      "Failure and cancellation traces; descriptive only."
+    ],
+    "full_budget_score": "Not measured in this experiment. Do not combine with the historical 720-second runs.",
+    "sample_variance": "For each repeat, average the two case scores within each arm. For complete data, report the sample mean, sample variance (n-1 denominator) and sample standard deviation across 3 repeat macros, and do the same for the paired macro differences (text-source minus text). Publish all six paired observations, case means and exposure counts. The primary analysis includes unexposed cases.",
+    "missing": "A transport/infra failure, unreadable snapshot, unstable cutoff or missing record is unmeasured. Never replace it with a zero; show coverage. Only fully observed case pairs and repeats enter their respective descriptive summaries. No confirmatory decision with any incomplete pair.",
+    "retries": "Retain original attempts. Use the first measured result for each arm in the same valid paired execution. Re-run the entire pair only for a technical failure; never select the best score.",
+    "exposure": "Count one candidate trial as exposed if its archived model request includes the added numbered excerpt in the first repair observation following an eligible execution failure. Producing an exception or composing but never sending the observation is insufficient; the baseline has no treatment."
+  },
+  "decision": {
+    "positive_same_family": "All six pairs measured, at least one candidate trial exposed, neither case has a negative mean paired change, and each of the three repeat-level macro paired differences is strictly positive. Expand evaluation on new inputs only under these conditions.",
+    "otherwise": "If the design is complete and exposed but these criteria fail, retain the existing text baseline. Any missing pair or no candidate repair exposure is insufficient evidence.",
+    "official": "Evaluate official PLE independently. No official score or broad promotion follows from this two-case study."
+  },
+  "reproducibility": {
+    "baseline_parent": "52dc6b2f683dc5295529843530fe2ee4ea6e1c71",
+    "historic_full_budget_commit": "6d1ea191e8127356a83340cfa6b09ff6edf9bf77",
+    "historic_pr_commit": "0f0340c0dd3b821c539b60e717dc55f7368a3894",
+    "authoritative_experiment_code": "Use the exact Actions run head SHA for the workflow, generator, grader and all runtime source. The scorer runs on the host; only task.md and the two input files enter the task container.",
+    "code_paths": [
+      ".github/workflows/ple-cpu-pilot.yml",
+      "devtools/design_regression.py",
+      "devtools/run_design_regression.py",
+      "devtools/record_paired_arm.py",
+      "devtools/paired_storage_report.py",
+      "devtools/start_cpu_model.sh",
+      "devtools/cloud_model_probe.py",
+      "serve.py",
+      "skillkit/harness.py",
+      "skillkit/code_action.py",
+      "skillkit/model.py",
+      "skillkit/specgen.py",
+      "skillkit/guard.py",
+      "skillkit/transport.py"
+    ],
+    "prompt_paths": [
+      "devtools/design_regression.py:TASK",
+      "skillkit/harness.py:Harness._system",
+      "skillkit/harness.py:Harness.run",
+      "skillkit/code_action.py:OBJECTIVE",
+      "skillkit/code_action.py:FORMAT",
+      "skillkit/model.py:TOOLS"
+    ],
+    "release": "Archive scorer and model exchange source, raw prompts, finished programs, input and output bytes, cutoff reports, exposure and missingness. Independently regrade the files. Derive paired statistics and figures before drafting conclusions.",
+    "planning_commit": "03989a333a1aae86a41af40cad568b085b97b24f"
+  }
+}

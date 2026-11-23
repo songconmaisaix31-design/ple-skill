@@ -1,5 +1,9 @@
 # PLE 实验接续记录
 
+## 当前运行状态
+
+手动轮次正在执行 `repair-source-v1`。新留出题 F/G 的输入哈希、分组、主要指标、三轮配对和继续条件已冻结。原有 D 的三次失败已通过离线回放，基线返回的反馈逐字一致，候选能附上第 79–83 行。下一次接手请先查 `codex/ple-cpu-cloud-pilot` 上名为 `Test source context in a fixed-seed repair ablation` 的提交和运行，已有相同轮次时沿用其运行编号。[本轮冻结协议](repair-source-v1/protocol.json)
+
 ## 2026-11-24 本轮新增观察
 
 复查上轮 D 题三次首轮 Python 运行的原始交互。三次收到同一份 4,463 字符的 Python 源码（去掉 Markdown 围栏后，SHA-256 前 16 位为 `eba7247453712a78`）。容器均在第 81 行退出，错误为 `TypeError: 'int' object is not subscriptable`。该行尝试逐项求和 `sum(c[0] for c in combination)`。三次修复请求都带有异常和行号，均未带上出错语句或完整程序。归档支持定位这个信息缺口，尚未测量补上源码对得分的影响。[上一轮逐次分数](paired-storage-v1/trials.csv) · [三次交互及产物](paired-storage-v1/evidence.zip)
