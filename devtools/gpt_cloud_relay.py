@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Host-local adapter from the PLE model interface to OVHcloud's anonymous GPT endpoint."""
 
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+from math import ceil, inf
 import os
 import threading
 import time
@@ -16,6 +19,7 @@ UPSTREAM = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions"
 PATH = "/v1/chat/completions"
 MAX_BODY = 8 * 1024 * 1024
 CALL_INTERVAL = 31
+MAX_LOCAL_WAIT = 120
 LOCK = threading.Lock()
 NEXT_CALL = 0.0
 
@@ -25,38 +29,67 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
+def retry_delay(header):
+    if not header:
+        return CALL_INTERVAL
+    value = header.strip()
+    if value.isascii() and value.isdecimal():
+        digits = value.lstrip("0") or "0"
+        return max(CALL_INTERVAL, int(digits)) if len(digits) <= 9 else inf
+    try:
+        deadline = parsedate_to_datetime(value)
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        return max(CALL_INTERVAL, ceil(deadline.timestamp() - time.time()))
+    except (OverflowError, OSError, TypeError, ValueError):
+        return CALL_INTERVAL
+
+
+def rate_limited(delay):
+    # The advertised delay is bounded, but the relay retains the full cooldown.
+    return 429, b'{"error":"GPT provider HTTP 429"}', ceil(min(delay, 86400))
+
+
 def forward(payload):
     global NEXT_CALL
 
     payload.setdefault("reasoning_effort", "high")
     request = Request(UPSTREAM, json.dumps(payload).encode(), {"Content-Type": "application/json"})
     with LOCK:
-        time.sleep(max(0, NEXT_CALL - time.monotonic()))
+        delay = NEXT_CALL - time.monotonic()
+        if delay > MAX_LOCAL_WAIT:
+            return rate_limited(delay)
+        time.sleep(max(0, delay))
         NEXT_CALL = time.monotonic() + CALL_INTERVAL
 
-    try:
-        with build_opener(NoRedirect()).open(request, timeout=120) as response:
-            body = response.read(MAX_BODY + 1)
-            if len(body) <= MAX_BODY:
-                return response.status, body
-    except HTTPError as exc:
-        with exc:
-            status = exc.code
-        if 400 <= status <= 599:
-            return status, json.dumps({"error": f"GPT provider HTTP {status}"}).encode()
-    except OSError:
-        pass
-    return 502, b'{"error":"GPT provider connection or response failed"}'
+        try:
+            with build_opener(NoRedirect()).open(request, timeout=120) as response:
+                body = response.read(MAX_BODY + 1)
+                if len(body) <= MAX_BODY:
+                    return response.status, body, None
+        except HTTPError as exc:
+            with exc:
+                if exc.code == 429:
+                    delay = retry_delay((exc.headers or {}).get("Retry-After"))
+                    NEXT_CALL = max(NEXT_CALL, time.monotonic() + delay)
+                    return rate_limited(delay)
+                if 400 <= exc.code <= 599:
+                    return exc.code, json.dumps({"error": f"GPT provider HTTP {exc.code}"}).encode(), None
+        except OSError:
+            pass
+    return 502, b'{"error":"GPT provider connection or response failed"}', None
 
 
 class Relay(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def send_json(self, status, body):
+    def send_json(self, status, body, retry_after=None):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        if retry_after is not None:
+            self.send_header("Retry-After", str(retry_after))
         self.end_headers()
         try:
             self.wfile.write(body)

@@ -46,6 +46,72 @@ jobs:
               raise SystemExit("This pilot requires the official gpt-oss-120b model ID.")
           PY
 
+      - name: Verify GPT tool calls before requesting Hugging Face login
+        shell: bash
+        run: |
+          umask 077
+          export MODEL_PROXY_URL=http://127.0.0.1:4101
+          MODEL_PROXY_KEY=$(openssl rand -hex 24)
+          export MODEL_PROXY_KEY
+          printf '::add-mask::%s\n' "$MODEL_PROXY_KEY"
+          printf 'MODEL_PROXY_URL=%s\nMODEL_PROXY_KEY=%s\n' "$MODEL_PROXY_URL" "$MODEL_PROXY_KEY" >> "$GITHUB_ENV"
+          nohup python3 devtools/gpt_cloud_relay.py </dev/null >"$RUNNER_TEMP/ple-relay.log" 2>&1 &
+          curl --max-time 5 --fail --silent --retry 8 --retry-connrefused --retry-delay 1 "$MODEL_PROXY_URL/ready" >/dev/null
+
+          python3 - <<'PY'
+          import json
+          import os
+          import time
+          from urllib.error import HTTPError, URLError
+          from urllib.request import Request, urlopen
+
+          payload = {
+              "model": "gpt-oss-120b",
+              "messages": [{"role": "user", "content": "Call hello with the name Ada."}],
+              "max_tokens": 256,
+              "reasoning_effort": "low",
+              "tools": [{"type": "function", "function": {
+                  "name": "hello", "description": "Greet a person",
+                  "parameters": {"type": "object", "properties": {
+                      "name": {"type": "string"}}, "required": ["name"]},
+              }}],
+              "tool_choice": "auto",
+          }
+          request = Request(os.environ["MODEL_PROXY_URL"] + "/v1/chat/completions",
+                            json.dumps(payload).encode(),
+                            {"Content-Type": "application/json", "Authorization": "Bearer " + os.environ["MODEL_PROXY_KEY"]})
+          delays = (35, 65, 95, 120)
+          for attempt in range(len(delays) + 1):
+              try:
+                  with urlopen(request, timeout=255) as response:
+                      output = json.load(response)
+                  break
+              except HTTPError as exc:
+                  if attempt == len(delays) or exc.code not in (429, 500, 502, 503, 504):
+                      raise SystemExit(f"GPT tool-call probe failed with HTTP {exc.code}.") from None
+                  retry_after = (exc.headers.get("Retry-After") or "").strip()
+                  upstream_wait = int(retry_after) if retry_after.isascii() and retry_after.isdigit() else 0
+                  if upstream_wait > 120:
+                      raise SystemExit(f"GPT provider requested a cooldown of {upstream_wait} seconds.") from None
+                  delay = max(delays[attempt], upstream_wait)
+                  print(f"GPT probe received HTTP {exc.code}. Retrying in {delay} seconds.", flush=True)
+                  time.sleep(delay)
+              except (URLError, TimeoutError):
+                  if attempt == len(delays):
+                      raise SystemExit("GPT tool-call probe timed out.") from None
+                  time.sleep(delays[attempt])
+          try:
+              calls = output["choices"][0]["message"]["tool_calls"]
+              valid = output["model"] == "gpt-oss-120b" and any(
+                  call["function"]["name"] == "hello" and
+                  json.loads(call["function"]["arguments"]) == {"name": "Ada"} for call in calls)
+          except (KeyError, TypeError, ValueError, IndexError):
+              valid = False
+          if not valid:
+              raise SystemExit("GPT tool-call probe did not return the expected synthetic tool call.")
+          print("gpt-oss-120b synthetic tool-call probe passed.")
+          PY
+
       - name: Prepare Hugging Face device authorization for this runner
         id: hf_device
         if: ${{ github.event.head_commit.message == 'Start authorized GPT cloud pilot' }}
@@ -95,68 +161,13 @@ jobs:
             exit 1
           fi
 
-      - name: Verify GPT tool calls and score one checks-only task when authorized
+      - name: Verify access to the official PLE dataset
+        id: dataset_access
         shell: bash
         env:
           HF_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
           HF_HUB_DISABLE_TELEMETRY: '1'
         run: |
-          umask 077
-          export MODEL_PROXY_URL=http://127.0.0.1:4101
-          MODEL_PROXY_KEY=$(openssl rand -hex 24)
-          export MODEL_PROXY_KEY
-          env -u HF_TOKEN python3 devtools/gpt_cloud_relay.py >"$RUNNER_TEMP/ple-relay.log" 2>&1 &
-          relay_pid=$!
-          trap 'kill "$relay_pid" 2>/dev/null || true' EXIT
-          curl --max-time 5 --fail --silent --retry 8 --retry-connrefused --retry-delay 1 "$MODEL_PROXY_URL/ready" >/dev/null
-
-          env -u HF_TOKEN python3 - <<'PY'
-          import json
-          import os
-          import time
-          from urllib.error import HTTPError, URLError
-          from urllib.request import Request, urlopen
-
-          payload = {
-              "model": "gpt-oss-120b",
-              "messages": [{"role": "user", "content": "Call hello with the name Ada."}],
-              "max_tokens": 256,
-              "reasoning_effort": "low",
-              "tools": [{"type": "function", "function": {
-                  "name": "hello", "description": "Greet a person",
-                  "parameters": {"type": "object", "properties": {
-                      "name": {"type": "string"}}, "required": ["name"]},
-              }}],
-              "tool_choice": "auto",
-          }
-          request = Request(os.environ["MODEL_PROXY_URL"] + "/v1/chat/completions",
-                            json.dumps(payload).encode(),
-                            {"Content-Type": "application/json", "Authorization": "Bearer " + os.environ["MODEL_PROXY_KEY"]})
-          for attempt in range(3):
-              try:
-                  with urlopen(request, timeout=160) as response:
-                      output = json.load(response)
-                  break
-              except HTTPError as exc:
-                  if attempt == 2 or exc.code not in (429, 500, 502, 503, 504):
-                      raise SystemExit(f"GPT tool-call probe failed with HTTP {exc.code}.") from None
-                  time.sleep(31)
-              except (URLError, TimeoutError):
-                  if attempt == 2:
-                      raise SystemExit("GPT tool-call probe timed out.") from None
-                  time.sleep(31)
-          try:
-              calls = output["choices"][0]["message"]["tool_calls"]
-              valid = output["model"] == "gpt-oss-120b" and any(
-                  call["function"]["name"] == "hello" and
-                  json.loads(call["function"]["arguments"]) == {"name": "Ada"} for call in calls)
-          except (KeyError, TypeError, ValueError, IndexError):
-              valid = False
-          if not valid:
-              raise SystemExit("GPT tool-call probe did not return the expected synthetic tool call.")
-          print("gpt-oss-120b synthetic tool-call probe passed.")
-          PY
-
           if [[ -z "$HF_TOKEN" && ( -z "${HF_HOME:-}" || ! -s "$HF_HOME/token" ) ]]; then
             echo 'Official dev task not run. Awaiting Hugging Face dataset access.' | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
@@ -186,7 +197,16 @@ jobs:
                   break
           print("Hugging Face dataset access verified.")
           PY
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
 
+      - name: Run and score one official checks-only task
+        if: steps.dataset_access.outputs.ready == 'true'
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        run: |
+          cd "$RUNNER_TEMP/ple-official"
           export UV_TOOL_BIN_DIR="$RUNNER_TEMP/ple-bin"
           mkdir -p "$UV_TOOL_BIN_DIR"
           export PATH="$UV_TOOL_BIN_DIR:$PATH"
