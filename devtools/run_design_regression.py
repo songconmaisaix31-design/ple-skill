@@ -15,6 +15,7 @@ import tempfile
 import time
 import uuid
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 
 IMAGE = "python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b"
@@ -246,22 +247,83 @@ def first_code_action(lines):
     return None
 
 
+class ModelIOArchive:
+    """Host-side transcript for the two explicitly opted-in, original CPU fixtures."""
+
+    def __init__(self, path, limit=2 * 1024 * 1024):
+        self.path = path
+        self.limit = limit
+        self.bytes_written = 0
+        self.requests = 0
+        self.omitted = 0
+        path.open("xb").close()
+
+    def write(self, record):
+        encoded = (json.dumps(record, ensure_ascii=True, separators=(",", ":")) + "\n").encode("utf-8")
+        if self.bytes_written + len(encoded) > self.limit - 256:
+            self.omitted += 1
+            return
+        with self.path.open("ab") as stream:
+            stream.write(encoded)
+        self.bytes_written += len(encoded)
+
+    def request(self, body):
+        self.requests += 1
+        allowed = ("model", "messages", "tools", "tool_choice", "max_tokens", "reasoning_effort",
+                   "temperature", "seed", "top_p", "stop")
+        fields = {key: body[key] for key in allowed if key in body}
+        if set(body) - set(allowed) or not isinstance(fields.get("messages"), list):
+            self.omitted += 1
+        self.write({"event": "request", "call": self.requests, "body": fields})
+        return self.requests
+
+    def response(self, call_id, payload):
+        # Include exact visible assistant text and native function arguments, which
+        # contain the generated Python. Credentials, hidden model state and HTTP
+        # headers are not part of the generation transcript.
+        choices = []
+        for choice in payload.get("choices") or []:
+            message = choice.get("message") or {}
+            visible = {k: message[k] for k in ("role", "content", "tool_calls") if k in message}
+            choices.append({"finish_reason": choice.get("finish_reason"), "message": visible})
+        if not choices:
+            self.omitted += 1
+        self.write({"event": "response", "call": call_id, "choices": choices})
+
+    def finish(self):
+        summary = {"complete": self.requests > 0 and self.omitted == 0,
+                   "requests": self.requests, "omitted_records_or_fields": self.omitted}
+        with self.path.open("ab") as stream:
+            stream.write((json.dumps({"event": "end", **summary}) + "\n").encode("ascii"))
+        return summary
+
+
 @contextmanager
-def record_model_requests(attempts, first_events, elapsed):
+def record_model_requests(attempts, first_events, elapsed, archive=None):
     import httpx
     post = httpx.AsyncClient.post
 
     async def observed(client, *args, **kwargs):
         before = time.monotonic()
         row = {"status": "error"}
+        call_id = None
+        if archive is not None:
+            endpoint = urlsplit(str(args[0] if args else kwargs.get("url", "")))
+            if endpoint.hostname in ("127.0.0.1", "localhost", "::1") and endpoint.path == "/v1/chat/completions":
+                call_id = archive.request(kwargs.get("json") or {})
         try:
             response = await post(client, *args, **kwargs)
             row.update(status="complete", http_status=response.status_code)
             if response.is_success:
                 try:
-                    row.update(describe_model_response(response.json()))
+                    payload = response.json()
+                    if call_id is not None:
+                        archive.response(call_id, payload)
+                    row.update(describe_model_response(payload))
                 except (ValueError, TypeError, AttributeError, LookupError, RecursionError):
                     row["response_shape"] = "unrecognized"
+                    if call_id is not None:
+                        archive.omitted += 1
             return response
         except asyncio.CancelledError:
             row["status"] = "interrupted"
@@ -269,6 +331,9 @@ def record_model_requests(attempts, first_events, elapsed):
         finally:
             row["end_sec"] = round(elapsed(), 2)
             row["duration_sec"] = round(time.monotonic() - before, 2)
+            if call_id is not None:
+                archive.write({"event": "status", "call": call_id, "status": row["status"],
+                               "http_status": row.get("http_status"), "end_sec": row["end_sec"]})
             first_events.setdefault("first_model_attempt", row)
             if row.get("tools") or row.get("text_chars"):
                 first_events.setdefault("first_model_output", row)
@@ -318,7 +383,8 @@ async def task_container(inputs, fixture_paths):
         await asyncio.to_thread(docker, "rm", "-f", name, read=True)
 
 
-async def measure(workspace, variant, seconds, kit_root, check_transport=False, checkpoint_sec=None):
+async def measure(workspace, variant, seconds, kit_root, check_transport=False, checkpoint_sec=None,
+                  archive_path=None):
     sys.path.insert(0, str(kit_root))
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import websockets
@@ -326,6 +392,12 @@ async def measure(workspace, variant, seconds, kit_root, check_transport=False, 
     from serve import solve
     from design_regression import grade, prepare
 
+    archive = None
+    if archive_path is not None:
+        if (check_transport or variant not in ("d", "e")
+                or archive_path.resolve().is_relative_to(workspace.resolve())):
+            raise ValueError("model IO must be archived outside a synthetic D/E task workspace")
+        archive = ModelIOArchive(archive_path)
     if check_transport:
         workspace.mkdir()
         (workspace / "task.md").write_text("Save output/schedule.csv and output/summary.json under output/.")
@@ -353,7 +425,8 @@ async def measure(workspace, variant, seconds, kit_root, check_transport=False, 
         relay = RecordingRelay(DockerExecutor(name, user="65534:65534"), workdir=WORKDIR,
                                agent_timeout_sec=seconds)
         model_override = (patch("serve.from_env", return_value=TransportProbe()) if check_transport
-                          else record_model_requests(model_attempts, first_events, lambda: time.monotonic() - started))
+                          else record_model_requests(model_attempts, first_events,
+                                                     lambda: time.monotonic() - started, archive))
         with model_override:
             async with websockets.serve(solve, "127.0.0.1", 0, max_size=16 * 1024 * 1024,
                                         ping_interval=None) as server:
@@ -415,6 +488,8 @@ async def measure(workspace, variant, seconds, kit_root, check_transport=False, 
               "last_actions": list(actions), "final_message_chars": len(outcome.final_message),
               "done_after_cancel": outcome.done_after_cancel}
     report.update(first_events=first_events, last_model_attempts=list(model_attempts))
+    if archive is not None:
+        report["model_io_archive"] = archive.finish()
     if checkpoint is not None:
         report["checkpoint"] = checkpoint
     first_action = first_code_action(outcome.log)
@@ -438,9 +513,18 @@ def main():
     parser.add_argument("--checkpoint-only-sec", type=int,
                         help="Capture and grade at this external cutoff, then stop the session")
     parser.add_argument("--keep-dir", type=Path, help="New directory for the original inputs and two outputs")
+    parser.add_argument("--archive-model-io", type=Path, metavar="JSONL",
+                        help="Save model prompts and generated code for original D/E local CPU trials")
     args = parser.parse_args()
     if not 1 <= args.timeout_sec <= 21600:
         parser.error("time budget must be between 1 and 21600 seconds")
+    if args.archive_model_io is not None:
+        endpoint = urlsplit(os.environ.get("MODEL_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or "")
+        if (args.check_transport or args.variant not in ("d", "e") or os.environ.get("MODEL_NAME") != "gemma-4-26b"
+                or endpoint.hostname not in ("127.0.0.1", "localhost", "::1")):
+            parser.error("--archive-model-io is available only for original D/E trials on the local Gemma CPU endpoint")
+        if args.archive_model_io.exists() or not args.archive_model_io.parent.is_dir():
+            parser.error("--archive-model-io needs a new file in an existing host directory")
     if args.checkpoint_only_sec is not None and (args.check_transport or not 0 < args.checkpoint_only_sec < args.timeout_sec):
         parser.error("--checkpoint-only-sec needs a full model run and must be shorter than --timeout-sec")
     kit = args.kit_root.resolve()
@@ -455,10 +539,10 @@ def main():
         if workspace.exists():
             parser.error("--keep-dir must not exist")
         return asyncio.run(measure(workspace, args.variant, args.timeout_sec, kit,
-                                   args.check_transport, args.checkpoint_only_sec))
+                                   args.check_transport, args.checkpoint_only_sec, args.archive_model_io))
     with tempfile.TemporaryDirectory(prefix="ple-design-") as temporary:
         return asyncio.run(measure(Path(temporary) / "task", args.variant, args.timeout_sec, kit,
-                                   args.check_transport, args.checkpoint_only_sec))
+                                   args.check_transport, args.checkpoint_only_sec, args.archive_model_io))
 
 
 if __name__ == "__main__":
