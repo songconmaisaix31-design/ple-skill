@@ -23,6 +23,7 @@ sys.path.insert(0, str(REPO))
 
 from skillkit import specgen
 from skillkit.harness import Harness
+from skillkit.mcp import exact_copy_contract
 from skillkit.transport import LocalTransport
 
 MODEL = "claude-opus-5-5"
@@ -114,6 +115,97 @@ async def check_mcp_results():
     assert "No confirmed tool result content." in result.splitlines()[0] and "[HTTP response body truncated]" in result
     partial = await call(sse.rstrip() + "\r\n", content_type="text/event-stream")
     assert "No confirmed tool result content." in partial.splitlines()[0], partial
+
+
+async def check_exact_mcp_copy():
+    url = "http://127.0.0.1:8123/measurements"
+    servers = [{"name": "measurements", "url": url, "transport": "streamable-http"}]
+    workspace = "/workspace"
+    filename = "readings/measurement.txt"
+    path = f"{workspace}/{filename}"
+    instruction = ("Invoke the tool called `latest` on MCP server `measurements`. "
+                   f"Copy the tool output unchanged to `{filename}`.")
+    assert exact_copy_contract(instruction, workspace, servers) == (url, "latest", path)
+    for unsupported in (
+        instruction.replace(filename, "../measurement.txt"),
+        instruction.replace(filename, "/tmp/measurement.txt"),
+        instruction.replace("Copy the tool output unchanged", "Summarize the tool output"),
+        instruction + " Also write `report.md`.",
+        instruction + " Append the units.",
+        instruction.replace("`measurements`", "`unknown`"),
+        ("Invoke the tool called `latest` on MCP server `measurements`. "
+         f"Using the tool response, write `{filename}` with exactly three decimal places."),
+    ):
+        assert exact_copy_contract(unsupported, workspace, servers) is None, unsupported
+
+    original = "  读数 4.25\r\n"
+    files = {}
+    request = {"jsonrpc": "2.0", "id": 41, "method": "tools/call", "params": {"name": "latest"}}
+
+    def response(text=original, rpc_id=41, **fields):
+        payload = {"jsonrpc": "2.0", "id": rpc_id, "result": {
+            "content": [{"type": "text", "text": text}], **fields,
+        }}
+        body = f"event: message\ndata: {json.dumps(payload)}\n\n".encode()
+        return {"ok": True, "status": 200, "headers": {"Content-Type": "text/event-stream"},
+                "body_b64": base64.b64encode(body).decode()}
+
+    async def exec_stub(command, timeout):
+        if command == "overwrite with model confirmation":
+            files[path] = b"File written successfully."
+        return {"ok": True, "output": ""}
+
+    async def write_stub(target, data, append=False):
+        assert target == path and not append
+        files[target] = data
+        return {"ok": True}
+
+    http = AsyncMock()
+    transport = SimpleNamespace(http=http, exec=exec_stub, write_file=write_stub,
+                                read_file=AsyncMock(side_effect=files.get))
+    calls = [
+        {"id": "read", "name": "mcp_call", "arguments": {"url": url, "body": json.dumps(request)}},
+        {"id": "write", "name": "write_file", "arguments": {"path": filename, "content": "Result copied."}},
+        {"id": "exec", "name": "exec", "arguments": {"command": "overwrite with model confirmation"}},
+        {"id": "finish", "name": "finish", "arguments": {"final_message": "The measurement is saved."}},
+    ]
+    model = SimpleNamespace(chat=AsyncMock(return_value={"tool_calls": calls}))
+    harness = Harness(transport, model, instruction, workdir=workspace, mcp_servers=servers)
+    with patch.object(harness.guard, "run", AsyncMock(return_value=("PASS", ""))):
+        for invalid in (
+            response(rpc_id="41"), response(structuredContent={"unit": "m"}),
+            response(isError=True), {**response(), "truncated": True}, {**response(), "status": 202},
+            response(content=[{"type": "text", "text": original}, {"type": "image", "data": "AA=="}]),
+        ):
+            http.return_value = invalid
+            await harness._do(calls[0])
+            assert not files, files
+
+        http.return_value = response()
+        await harness._do({**calls[0], "arguments": {**calls[0]["arguments"], "url": url + "/another"}})
+        assert not files, files
+        assert await harness.run() == "The measurement is saved."
+        mcp_tools = model.chat.call_args.kwargs["tools"]
+        mcp_schema = next(tool for tool in mcp_tools if tool["name"] == "mcp_call")
+        assert "output_path" in mcp_schema["parameters"]["properties"]
+        assert files[path] == original.encode(), files
+        assert "managed by the exact MCP copy" in await harness._do(calls[1])
+
+        http.return_value = response("A conflicting measurement.")
+        assert "conflicting values" in await harness._do(calls[0])
+        assert files[path] == original.encode(), files
+
+    files.clear()
+    staged = Harness(transport, model, f"Save `{filename}` after processing the measurements.",
+                     workdir=workspace, mcp_servers=servers)
+    http.return_value = response()
+    assert "verbatim" not in await staged._do(calls[0])
+    assert not files, files
+    direct = {**calls[0], "arguments": {**calls[0]["arguments"], "output_path": filename}}
+    assert "Saved the MCP tool result verbatim" in await staged._do(direct)
+    assert files[path] == original.encode()
+    await staged._do({**calls[1], "arguments": {"path": path, "content": "Adjusted measurement."}})
+    assert files[path] == b"Adjusted measurement."
 
 
 def tool(call_id, name, **arguments):
@@ -262,6 +354,7 @@ async def main():
     check_contracts()
     await check_python_output()
     await check_mcp_results()
+    await check_exact_mcp_copy()
     stub = MessagesStub()
     async with await asyncio.start_server(stub.handle, "127.0.0.1", 0) as server:
         stub_port = server.sockets[0].getsockname()[1]

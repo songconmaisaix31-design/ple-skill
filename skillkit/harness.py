@@ -8,12 +8,13 @@ guard-driven iteration until the guard passes or time runs out.
 import asyncio
 import base64
 import json
+import posixpath
 import re
 
 from . import specgen, router
 from .guard import Guard
-from .mcp import result_excerpt
-from .model import PYTHON_SOURCE_MAX, PYTHON_TIMEOUT_DEFAULT, PYTHON_TIMEOUT_MAX
+from .mcp import declared_output_path, exact_copy_contract, exact_tool_text, named_output_paths, result_excerpt
+from .model import MCP_OUTPUT_TOOLS, PYTHON_SOURCE_MAX, PYTHON_TIMEOUT_DEFAULT, PYTHON_TIMEOUT_MAX
 from .transport import quote_path
 
 MAX_STEPS = 240
@@ -98,6 +99,10 @@ class Harness:
         self._periodic_alerts = 0
         self._finish_refusals = 0
         self._ctx = router.load_context(self.route["domain"])
+        self._mcp_outputs = named_output_paths(instruction, self.workdir) if self.mcp else set()
+        self._mcp_copy = exact_copy_contract(instruction, self.workdir, self.mcp, self._mcp_outputs)
+        self._mcp_copy_value = None
+        self._mcp_copy_ambiguous = False
 
     # ---------- prompt ----------
     def _single_data_file(self):
@@ -135,9 +140,12 @@ class Harness:
                          "notifications/initialized before tools/list or tools/call. Include "
                          "the returned Mcp-Session-Id header (if present) and set the "
                          "MCP-Protocol-Version header to the initialize result's protocolVersion "
-                         "on subsequent requests. For copy tasks, use the returned MCP tool "
-                         "result content verbatim. HTTP acknowledgements and initialization "
-                         "confirmations carry no tool data.")
+                         "on subsequent requests. Set output_path on a tools/call request when "
+                         "the tool should save its returned text verbatim to a task-named file. "
+                         "HTTP acknowledgements and initialization confirmations carry no tool data.")
+            if self._mcp_copy:
+                parts.append("For the explicitly requested file copy, a confirmed result will "
+                             "be saved directly. After it is saved, call finish without rewriting it.")
         parts.append("\n=== WORKSPACE SNAPSHOT (taken by the harness before you started) ===\n"
                      + snapshot)
         return "\n".join(parts)
@@ -160,6 +168,60 @@ class Harness:
         return out
 
     # ---------- tools ----------
+    async def _capture_mcp_copy(self, arguments, response, status, content_type, truncated):
+        method, url = arguments.get("method", "POST"), arguments.get("url", "")
+        if not isinstance(method, str) or method.upper() != "POST":
+            return ""
+        if not any(server.get("url") == url and server.get("transport") == "streamable-http"
+                   for server in self.mcp):
+            return ""
+        chosen_path = arguments.get("output_path")
+        path = declared_output_path(chosen_path, self.workdir, self._mcp_outputs)
+        if chosen_path is not None and path is None:
+            return "MCP tool output_path must name a text destination stated in the task."
+        exact = self._mcp_copy
+        tool = None
+        if exact and (path is None or path == exact[2]):
+            if url != exact[0] or self._mcp_copy_ambiguous:
+                return ""
+            _, tool, path = exact
+        if path is None:
+            return ""
+        value = exact_tool_text(tool, arguments.get("body") or "", response, status, content_type, truncated)
+        if value is None:
+            return "No complete MCP tool text was saved." if chosen_path is not None else ""
+        try:
+            data = value.encode("utf-8")
+        except UnicodeEncodeError:
+            return ""
+        maximum = self.limits.get("max_write_bytes") or 10_000_000
+        if len(data) > maximum:
+            return ""
+        if tool is not None:
+            if self._mcp_copy_value is not None and self._mcp_copy_value != data:
+                self._mcp_copy_value = None
+                self._mcp_copy_ambiguous = True
+                return "MCP returned conflicting values. Automatic copy disabled. Resolve which result the task requires."
+            self._mcp_copy_value = data
+        result = await self.t.write_file(path, data)
+        if not result.get("ok"):
+            return f"MCP exact copy could not be saved to {path}."
+        self._since_guard = min(self._since_guard, 0)
+        return f"Saved the MCP tool result verbatim to {path}."
+
+    async def _check_mcp_copy(self):
+        if not self._mcp_copy or self._mcp_copy_ambiguous:
+            return ""
+        if self._mcp_copy_value is None:
+            return "No confirmed plain-text result was obtained from the named MCP tool."
+        _, _, path = self._mcp_copy
+        if await self.t.read_file(path) == self._mcp_copy_value:
+            return ""
+        await self.t.write_file(path, self._mcp_copy_value)
+        if await self.t.read_file(path) == self._mcp_copy_value:
+            return ""
+        return f"Could not verify the exact tool result in {path}."
+
     async def _save_python_output(self, path, execution):
         if not execution.get("ok") or execution.get("exit_code") != 0 or execution.get("timed_out"):
             return "[run_python] no file saved: execution did not complete successfully"
@@ -230,12 +292,17 @@ class Harness:
             except UnicodeDecodeError:
                 return "[binary, %d bytes]" % len(data)
         if name == "write_file":
+            path = a.get("path", "")
             content = a.get("content", "")
             if a.get("b64"):
                 blob = base64.b64decode(content)
             else:
                 blob = content.encode()
-            r = await self.t.write_file(a.get("path", ""), blob, a.get("append", False))
+            if self._mcp_copy_value is not None:
+                target = posixpath.normpath(posixpath.join(self.workdir, path))
+                if target == self._mcp_copy[2] and (blob != self._mcp_copy_value or a.get("append")):
+                    return "The file is managed by the exact MCP copy. Call finish without rewriting it."
+            r = await self.t.write_file(path, blob, a.get("append", False))
             self._since_guard = min(self._since_guard, 0)
             if r.get("ok") is False:
                 return "[write_file] failed: " + str(r.get("error"))
@@ -251,13 +318,20 @@ class Harness:
                 return "[mcp_call] headers must be a mapping of strings to strings"
             hdrs.update({key.lower(): value for key, value in supplied_headers.items()})
             body = a.get("body") or ""
-            r = await self.t.http(a.get("method", "POST"), a.get("url", ""), hdrs, body.encode())
+            method, url = a.get("method", "POST"), a.get("url", "")
+            r = await self.t.http(method, url, hdrs, body.encode())
             if r.get("ok") is False and r.get("status") is None:
                 return f"[mcp_call] relay failed: {r.get('error') or 'no HTTP response'}"
 
+            valid_text = True
             try:
-                txt = base64.b64decode(r.get("body_b64") or "", validate=True).decode("utf-8", "replace")
+                raw = base64.b64decode(r.get("body_b64") or "", validate=True)
+                txt = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                valid_text = False
+                txt = raw.decode("utf-8", "replace")
             except (TypeError, ValueError):
+                valid_text = False
                 txt = "[invalid HTTP response body encoding]"
 
             status = r.get("status")
@@ -266,6 +340,11 @@ class Harness:
                                  if key.lower() == "content-type"), "")
             excerpt = result_excerpt(body, txt, status, content_type, r.get("truncated", False))
             result = [excerpt[:4096]] if excerpt else []
+            if valid_text and r.get("ok"):
+                saved = await self._capture_mcp_copy(a, txt, status, content_type,
+                                                     r.get("truncated", False))
+                if saved:
+                    result.append(saved)
             if len(excerpt) > 4096:
                 result.append("[MCP tool result display truncated]")
             result.append(f"[http {status}]")
@@ -331,7 +410,10 @@ class Harness:
                                  "valid and readable, then call finish with a summary."})
                 wrap_at = None
             try:
-                resp = await self.model.chat(messages, system)
+                if self.mcp:
+                    resp = await self.model.chat(messages, system, tools=MCP_OUTPUT_TOOLS)
+                else:
+                    resp = await self.model.chat(messages, system)
             except Exception as e:
                 if self.steps == 0:
                     raise
@@ -397,7 +479,10 @@ class Harness:
                                                 "before anything else:\n" + rep})
 
             if finish_result is not None:
+                copy_error = await self._check_mcp_copy()
                 status, rep = await self.guard.run()
+                if copy_error:
+                    status, rep = "FAIL", copy_error + "\n" + rep
                 on_log(f"guard at finish: {status}")
                 if status in ("FAIL", "ERROR"):
                     self._finish_refusals += 1
@@ -416,7 +501,10 @@ class Harness:
                 break
 
         if not self.final:
+            copy_error = await self._check_mcp_copy()
             status, rep = await self.guard.run()
+            if copy_error:
+                status, rep = "FAIL", copy_error + "\n" + rep
             self.final = ("Deliverable: " + str(self.spec.get("deliverable")) +
                           f"\nGuard at exit: {status}\n" + rep[-1200:])
         return self.final

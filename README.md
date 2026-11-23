@@ -2,8 +2,9 @@
 
 Physical-Engineering's Last Exam 参赛 harness。**spec-first + 交付物守卫**的第一版实现。
 
-> **评测状态（2026-11-23）**：官方 `kit validate` 通过，`kit check` 通过配置解析后停在缺少模型代理配置，独立构建检查确认当前环境没有 Docker。离线闭环、原生 Claude 协议冒烟和 F-01 静态检查已通过。尚未运行公开 dev set，暂无官方 dev 分数或参赛 `artifacts/`。
-> 本文的「三项指标」是**对 baseline artifacts 的离线静态回归**，不是本 harness 跑过 29 题。
+> **云端实测（2026-11-23）**　Gemma 4 26B A4B 在 GitHub Actions 的 CPU 上完成了自建梁受力计算题。第 395 秒通过 1/8 项，约 647 秒时通过 8/8 项，包含四个独立校验的数值。[运行日志](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45171069072)
+> **正式开发集**　已尝试运行 `wind-diaphragm-shear`。Hugging Face 对运行器的凭据交换返回 `invalid_grant`，题目下载前流程结束。当前没有本项目的官方开发集分数或参赛 `artifacts/`。[正式题运行记录](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45167261631)
+> 下文“三项指标”衡量对主办方基线产物的离线静态回归。
 > 剩余任务、阻塞项、运行手册与合规红线见 **[HANDOFF.md](HANDOFF.md)**；评估原件见 `docs/00-接手评估.md`，修复记录见 `docs/01-修复与验证记录.md`，**F-01 处置说明见 `docs/02-合规说明.md`**。
 
 设计原点：**MCP 作为中心**——serve.py 持有会话与决策循环，所有动作（exec / read_file /

@@ -72,6 +72,15 @@ TOOLS = [
                     "required": ["final_message"]}},
 ]
 
+MCP_OUTPUT_TOOLS = [
+    {**tool, "parameters": {**tool["parameters"], "properties": {
+        **tool["parameters"]["properties"],
+        "output_path": {"type": "string", "description": "Optional task-named text output path. "
+                        "Write the single complete tools/call text result verbatim to this file."},
+    }}} if tool["name"] == "mcp_call" else tool
+    for tool in TOOLS
+]
+
 
 class ModelClient:
     def __init__(self, model_name, base_url, api_key, mode="openai",
