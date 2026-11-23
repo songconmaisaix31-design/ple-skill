@@ -11,7 +11,9 @@ import os
 import shlex
 import socket
 import sys
+import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import websockets
 
@@ -19,6 +21,8 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from skillkit import specgen
+from skillkit.harness import Harness
+from skillkit.transport import LocalTransport
 
 MODEL = "claude-opus-5-5"
 DELIVERABLE = "/app/smoke.txt"
@@ -40,6 +44,29 @@ def check_contracts():
     for instruction, expected in rules:
         actual = specgen.build(instruction)["deliverable"]
         assert actual == expected, (instruction, actual)
+
+
+async def check_python_output():
+    destination = "output/result.json"
+    with tempfile.TemporaryDirectory() as directory:
+        transport = LocalTransport(directory)
+        harness = Harness(transport, None, f"Write the result to `{destination}`.")
+        output = Path(directory) / destination
+
+        async def run_python(code):
+            return await harness._do({"name": "run_python", "arguments": {"code": code, "output_path": destination}})
+
+        result = await run_python("import sys\nprint('diagnostic', file=sys.stderr)\nprint('{\"count\": 7}')")
+        assert "saved" in result and output.read_bytes() == b'{"count": 7}\n', result
+
+        for code in ("print('{invalid')", "print('{\"count\": 9}')\nraise SystemExit(3)"):
+            assert "no file saved" in await run_python(code)
+            assert output.read_bytes() == b'{"count": 7}\n'
+
+        truncated = {"ok": True, "exit_code": 0, "output": '{"count": 9}\n', "truncated": True}
+        with patch.object(transport, "exec", AsyncMock(return_value=truncated)):
+            assert "stdout was truncated" in await run_python("print('{\"count\": 9}')")
+        assert output.read_bytes() == b'{"count": 7}\n'
 
 
 def tool(call_id, name, **arguments):
@@ -186,6 +213,7 @@ def serve_port():
 
 async def main():
     check_contracts()
+    await check_python_output()
     stub = MessagesStub()
     async with await asyncio.start_server(stub.handle, "127.0.0.1", 0) as server:
         stub_port = server.sockets[0].getsockname()[1]
@@ -229,7 +257,7 @@ async def main():
             output, _ = await proc.communicate()
             if output:
                 print(output.decode(errors="replace").rstrip(), file=sys.stderr)
-    print("PROTOCOL SMOKE: PASS (output contracts, Python forwarding, native turns, guard retry, cancel, HTTP 400)")
+    print("PROTOCOL SMOKE: PASS (output contracts, Python forwarding and save, native turns, guard retry, cancel, HTTP 400)")
 
 
 if __name__ == "__main__":

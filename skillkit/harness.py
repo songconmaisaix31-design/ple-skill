@@ -292,17 +292,22 @@ class Harness:
                f"/{self.route['family']}")
 
         prompt = "Task instruction:\n\n" + self.instruction
+        supplied_input = False
         if self._single_data_file():
             paths = list(dict.fromkeys(NAMED_TEXT_INPUT.findall(self.instruction)))
             for path in paths[:2]:
-                data = await self.t.read_file(path)
-                if data and len(data) <= 4096:
-                    try:
+                try:
+                    data = await self.t.read_file(path)
+                    if data and len(data) <= 4096:
                         body = data.decode("utf-8-sig")
-                    except UnicodeDecodeError:
-                        continue
-                    prompt += f"\n\nInput already obtained with read_file from {path}:\n{body}"
-        prompt += "\n\nBegin. Use the input already supplied and fetch any remaining inputs you need."
+                        prompt += f"\n\nInput already obtained with read_file from {path}:\n{body}"
+                        supplied_input = True
+                except (OSError, ValueError):
+                    continue
+        if supplied_input:
+            prompt += "\n\nBegin. Use the input already supplied and fetch any remaining inputs you need."
+        else:
+            prompt += "\n\nBegin. First read the inputs you need, then build."
         messages = [{"role": "user", "content": prompt}]
 
         asked = 0
