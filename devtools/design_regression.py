@@ -106,6 +106,20 @@ VARIANTS = {
             (4, 3, 3, 10), (5, 5, 8, 2), (6, 2, 6, 7),
         )),
     ),
+    "l": (
+        Site(7, 1, 14, 5, 8, (0, 3, 5, 8)),
+        tuple(Period(*row) for row in (
+            (1, 3, 5, 12), (2, 6, 8, 2), (3, 2, 3, 10),
+            (4, 5, 5, 5), (5, 2, 8, 1), (6, 4, 5, 8),
+        )),
+    ),
+    "m": (
+        Site(4, 0, 11, 4, 6, (0, 2, 4, 6)),
+        tuple(Period(*row) for row in (
+            (1, 2, 4, 9), (2, 4, 6, 3), (3, 5, 6, 1),
+            (4, 1, 2, 12), (5, 3, 4, 4), (6, 2, 6, 7),
+        )),
+    ),
 }
 SCHEDULE_COLUMNS = ("period", "pump_units", "end_storage_units", "period_cost_cents")
 RESULT_FILENAMES = {"schedule.csv", "summary.json"}
