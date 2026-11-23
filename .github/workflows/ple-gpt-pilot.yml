@@ -51,7 +51,7 @@ jobs:
           PY
 
       - name: Exchange the authorized runner identity for a temporary Hugging Face token
-        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' }}
+        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' }}
         shell: bash
         run: |
           umask 077
@@ -82,83 +82,9 @@ jobs:
             echo 'Hugging Face runner identity unavailable. Existing secrets or device login remain available.'
           fi
 
-      - name: Select and verify the configured cloud model
-        id: model_selection
-        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' }}
-        shell: bash
-        env:
-          PLE_OPENAI_API_KEY: ${{ secrets.PLE_OPENAI_API_KEY }}
-          PLE_HF_INFERENCE_TOKEN: ${{ secrets.PLE_HF_INFERENCE_TOKEN }}
-          PLE_HF_LEGACY_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
-        run: |
-          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
-          python="$RUNNER_TEMP/ple-official/.venv/bin/python"
-          if [[ -n "$PLE_OPENAI_API_KEY" ]] && \
-             env -u PLE_OPENAI_API_KEY -u PLE_HF_INFERENCE_TOKEN -u PLE_HF_LEGACY_TOKEN \
-             MODEL_API=openai/gpt-6.1-sol MODEL_NAME=gpt-6.1-sol \
-             MODEL_BASE_URL=https://api.openai.com/v1 MODEL_API_KEY="$PLE_OPENAI_API_KEY" \
-             "$python" -m devtools.cloud_model_probe; then
-            echo 'model_api=openai/gpt-6.1-sol' >> "$GITHUB_OUTPUT"
-            echo 'ready=true' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          oidc_file="$RUNNER_TEMP/ple-hf-oidc-token"
-          uses_oidc=false
-          if [[ -z "$PLE_HF_INFERENCE_TOKEN" && -s "$oidc_file" ]]; then
-            export PLE_HF_INFERENCE_TOKEN_FILE="$oidc_file"
-            uses_oidc=true
-          elif [[ -z "$PLE_HF_INFERENCE_TOKEN" && -n "$PLE_HF_LEGACY_TOKEN" ]]; then
-            export PLE_HF_INFERENCE_TOKEN="$PLE_HF_LEGACY_TOKEN"
-          elif [[ -z "$PLE_HF_INFERENCE_TOKEN" ]]; then
-            echo 'Pilot blocked before inference: no usable OpenAI key, Hugging Face runner identity, or Hugging Face inference token.' | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-
-          umask 077
-          export MODEL_PROXY_URL=http://127.0.0.1:4101
-          MODEL_PROXY_KEY=$(openssl rand -hex 24)
-          export MODEL_PROXY_KEY
-          printf '::add-mask::%s\n' "$MODEL_PROXY_KEY"
-          printf 'MODEL_PROXY_URL=%s\nMODEL_PROXY_KEY=%s\n' "$MODEL_PROXY_URL" "$MODEL_PROXY_KEY" >> "$GITHUB_ENV"
-          env -u PLE_OPENAI_API_KEY -u PLE_HF_LEGACY_TOKEN nohup python3 devtools/gpt_cloud_relay.py \
-            </dev/null >"$RUNNER_TEMP/ple-relay.log" 2>&1 &
-          curl --max-time 5 --fail --silent --retry 8 --retry-connrefused --retry-delay 1 "$MODEL_PROXY_URL/ready" >/dev/null
-          unset PLE_OPENAI_API_KEY PLE_HF_INFERENCE_TOKEN PLE_HF_INFERENCE_TOKEN_FILE PLE_HF_LEGACY_TOKEN
-          MODEL_API=google-cloud/glm-5.2 MODEL_NAME=glm-5.2 \
-            MODEL_BASE_URL="$MODEL_PROXY_URL/v1" MODEL_API_KEY="$MODEL_PROXY_KEY" \
-            "$python" -m devtools.cloud_model_probe
-          echo 'model_api=google-cloud/glm-5.2' >> "$GITHUB_OUTPUT"
-          echo 'ready=true' >> "$GITHUB_OUTPUT"
-          printf 'uses_oidc=%s\n' "$uses_oidc" >> "$GITHUB_OUTPUT"
-
-      - name: Validate the selected evaluation entry
-        if: steps.model_selection.outputs.ready == 'true'
-        shell: bash
-        env:
-          PLE_MODEL_API: ${{ steps.model_selection.outputs.model_api }}
-        run: |
-          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
-          entry="$GITHUB_WORKSPACE"
-          case "$PLE_MODEL_API" in
-            openai/gpt-6.1-sol)
-              entry="$RUNNER_TEMP/ple-sol-entry"
-              git clone --quiet "$GITHUB_WORKSPACE" "$entry"
-              sed -i 's@^model_api: google-cloud/glm-5[.]2$@model_api: openai/gpt-6.1-sol@' "$entry/submission.yaml"
-              git -C "$entry" add submission.yaml
-              git -C "$entry" -c user.name='PLE Cloud Pilot' -c user.email='pilot@users.noreply.github.com' \
-                commit --quiet -m 'Use GPT-6.1 Sol for this development run'
-              ;;
-            google-cloud/glm-5.2) ;;
-            *) echo 'Unexpected pilot model.'; exit 1 ;;
-          esac
-          printf 'PLE_EVAL_ENTRY=%s\nPLE_EVAL_MODEL_API=%s\n' "$entry" "$PLE_MODEL_API" >> "$GITHUB_ENV"
-          cd "$RUNNER_TEMP/ple-official"
-          uv run python -m kit validate "$entry"
-
       - name: Prepare Hugging Face device authorization for this runner
         id: hf_device
-        if: ${{ steps.model_selection.outputs.ready == 'true' && github.event.head_commit.message == 'Start authorized cloud model pilot' }}
+        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' }}
         shell: bash
         env:
           HF_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
@@ -208,12 +134,13 @@ jobs:
 
       - name: Verify and download the official checks-only task
         id: dataset_access
-        if: steps.model_selection.outputs.ready == 'true'
+        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' }}
         shell: bash
         env:
           HF_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
           HF_HUB_DISABLE_TELEMETRY: '1'
           HF_HUB_DISABLE_PROGRESS_BARS: '1'
+          PLE_UNATTENDED: ${{ github.event.head_commit.message == 'Run authorized PLE pilot' }}
         run: |
           unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
           if [[ -z "$HF_TOKEN" && -s "$RUNNER_TEMP/ple-hf-oidc-token" ]]; then
@@ -221,13 +148,14 @@ jobs:
             HF_TOKEN=$(cat "$RUNNER_TEMP/ple-hf-oidc-token")
           fi
           if [[ -z "$HF_TOKEN" && ( -z "${HF_HOME:-}" || ! -s "$HF_HOME/token" ) ]]; then
-            echo 'Official dev task not run. Awaiting Hugging Face dataset access.' | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
+            echo 'Official task not run. No authorized Hugging Face dataset credential is available.' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
 
           cd "$RUNNER_TEMP/ple-official"
           task_dir="$RUNNER_TEMP/ple-official-task"
           uv run python - "$task_dir" <<'PY'
+          import os
           from pathlib import Path
           import re
           import sys
@@ -238,12 +166,13 @@ jobs:
 
           api = HfApi()
           repo = "google/physical-engineerings-last-exam"
-          for attempt in range(21):
+          attempts = 1 if os.environ["PLE_UNATTENDED"] == "true" else 21
+          for attempt in range(attempts):
               try:
                   api.auth_check(repo, repo_type="dataset")
               except HfHubHTTPError as exc:
                   status = getattr(exc.response, "status_code", None)
-                  if status != 403 or attempt == 20:
+                  if status != 403 or attempt + 1 == attempts:
                       raise SystemExit(f"Hugging Face dataset permission check failed (HTTP {status}).") from None
                   if attempt == 0:
                       print("Hugging Face login succeeded. Waiting for the separate PLE dataset grant (HTTP 403).", flush=True)
@@ -272,13 +201,137 @@ jobs:
           printf 'PLE_TASKS_DIR=%s\n' "$task_dir/tasks" >> "$GITHUB_ENV"
           echo 'ready=true' >> "$GITHUB_OUTPUT"
 
-      - name: Run and score one official checks-only task
+      - name: Check the configured hosted models
+        id: hosted_model
         if: steps.dataset_access.outputs.ready == 'true'
         shell: bash
         env:
-          OPENAI_API_KEY: ${{ steps.model_selection.outputs.model_api == 'openai/gpt-6.1-sol' && secrets.PLE_OPENAI_API_KEY || '' }}
+          PLE_OPENAI_API_KEY: ${{ secrets.PLE_OPENAI_API_KEY }}
+          PLE_HF_INFERENCE_TOKEN: ${{ secrets.PLE_HF_INFERENCE_TOKEN }}
+          PLE_HF_LEGACY_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          python="$RUNNER_TEMP/ple-official/.venv/bin/python"
+          if [[ -n "$PLE_OPENAI_API_KEY" ]] && \
+             env -u PLE_OPENAI_API_KEY -u PLE_HF_INFERENCE_TOKEN -u PLE_HF_LEGACY_TOKEN \
+             MODEL_API=openai/gpt-6.1-sol MODEL_NAME=gpt-6.1-sol \
+             MODEL_BASE_URL=https://api.openai.com/v1 MODEL_API_KEY="$PLE_OPENAI_API_KEY" \
+             "$python" -m devtools.cloud_model_probe; then
+            echo 'model_api=openai/gpt-6.1-sol' >> "$GITHUB_OUTPUT"
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          oidc_file="$RUNNER_TEMP/ple-hf-oidc-token"
+          uses_oidc=false
+          if [[ -z "$PLE_HF_INFERENCE_TOKEN" && -s "$oidc_file" ]]; then
+            export PLE_HF_INFERENCE_TOKEN_FILE="$oidc_file"
+            uses_oidc=true
+          elif [[ -z "$PLE_HF_INFERENCE_TOKEN" && -n "$PLE_HF_LEGACY_TOKEN" ]]; then
+            export PLE_HF_INFERENCE_TOKEN="$PLE_HF_LEGACY_TOKEN"
+          elif [[ -z "$PLE_HF_INFERENCE_TOKEN" ]]; then
+            echo 'No hosted model credential is available. Checking local CPU models.' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          umask 077
+          export MODEL_PROXY_URL=http://127.0.0.1:4101
+          MODEL_PROXY_KEY=$(openssl rand -hex 24)
+          export MODEL_PROXY_KEY
+          printf '::add-mask::%s\n' "$MODEL_PROXY_KEY"
+          env -u PLE_OPENAI_API_KEY -u PLE_HF_LEGACY_TOKEN nohup python3 devtools/gpt_cloud_relay.py \
+            </dev/null >"$RUNNER_TEMP/ple-relay.log" 2>&1 &
+          relay_pid=$!
+          unset PLE_OPENAI_API_KEY PLE_HF_INFERENCE_TOKEN PLE_HF_INFERENCE_TOKEN_FILE PLE_HF_LEGACY_TOKEN
+          if curl --max-time 5 --fail --silent --retry 8 --retry-connrefused --retry-delay 1 "$MODEL_PROXY_URL/ready" >/dev/null && \
+             MODEL_API=google-cloud/glm-5.2 MODEL_NAME=glm-5.2 \
+             MODEL_BASE_URL="$MODEL_PROXY_URL/v1" MODEL_API_KEY="$MODEL_PROXY_KEY" \
+             "$python" -m devtools.cloud_model_probe; then
+            printf '%s\n' "$relay_pid" > "$RUNNER_TEMP/ple-relay.pid"
+            printf 'MODEL_PROXY_URL=%s\nMODEL_PROXY_KEY=%s\n' "$MODEL_PROXY_URL" "$MODEL_PROXY_KEY" >> "$GITHUB_ENV"
+            printf 'model_api=google-cloud/glm-5.2\nready=true\nuses_oidc=%s\n' "$uses_oidc" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          kill "$relay_pid" 2>/dev/null || true
+          echo 'Hosted inference could not be verified. Checking local CPU models.' | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Start an account-free CPU model
+        id: cpu_model
+        if: steps.dataset_access.outputs.ready == 'true' && steps.hosted_model.outputs.ready != 'true'
+        shell: bash
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN HF_HOME HF_TOKEN HUGGING_FACE_HUB_TOKEN
+          umask 077
+          export MODEL_PROXY_URL=http://127.0.0.1:4102
+          export PLE_CPU_STATE="$RUNNER_TEMP/ple-cpu"
+          MODEL_PROXY_KEY=$(openssl rand -hex 24)
+          export MODEL_PROXY_KEY
+          printf '::add-mask::%s\n' "$MODEL_PROXY_KEY"
+          python="$RUNNER_TEMP/ple-official/.venv/bin/python"
+          for profile in gemma26 granite; do
+            if bash devtools/start_cpu_model.sh "$profile"; then
+              source "$PLE_CPU_STATE/model.env"
+              if MODEL_API="$PLE_CPU_MODEL_API" MODEL_NAME="$PLE_CPU_MODEL_NAME" \
+                 MODEL_BASE_URL="$MODEL_PROXY_URL/v1" MODEL_API_KEY="$MODEL_PROXY_KEY" \
+                 "$python" -m devtools.cloud_model_probe; then
+                printf 'MODEL_PROXY_URL=%s\nMODEL_PROXY_KEY=%s\n' "$MODEL_PROXY_URL" "$MODEL_PROXY_KEY" >> "$GITHUB_ENV"
+                printf 'model_api=%s\nready=true\n' "$PLE_CPU_MODEL_API" >> "$GITHUB_OUTPUT"
+                if [[ "$PLE_CPU_MODEL_API" == openai-compatible/* ]]; then
+                  echo 'Using the Granite CPU model for development scoring only.' | tee -a "$GITHUB_STEP_SUMMARY"
+                else
+                  echo 'Using a local quantized Gemma model for this development run.' | tee -a "$GITHUB_STEP_SUMMARY"
+                fi
+                exit 0
+              fi
+              kill "$(cat "$PLE_CPU_STATE/server.pid")" 2>/dev/null || true
+              for _ in {1..10}; do
+                if ! curl --max-time 1 --silent "$MODEL_PROXY_URL/health" >/dev/null; then break; fi
+                sleep 1
+              done
+            fi
+            if [[ "$profile" == gemma26 ]]; then
+              rm -f "$PLE_CPU_STATE/gemma-4-26B-A4B-it-UD-IQ2_XXS.gguf"
+            fi
+          done
+          echo 'Official task not run. Neither CPU model passed the function-call probe.' | tee -a "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Validate the selected evaluation entry
+        id: entry_preparation
+        if: steps.hosted_model.outputs.ready == 'true' || steps.cpu_model.outputs.ready == 'true'
+        shell: bash
+        env:
+          PLE_MODEL_API: ${{ steps.hosted_model.outputs.model_api || steps.cpu_model.outputs.model_api }}
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          entry="$GITHUB_WORKSPACE"
+          case "$PLE_MODEL_API" in
+            openai/gpt-6.1-sol|google-cloud/gemma-4-26b|openai-compatible/granite-4.1-3b)
+              entry="$RUNNER_TEMP/ple-model-entry"
+              git clone --quiet "$GITHUB_WORKSPACE" "$entry"
+              sed -i "s@^model_api: google-cloud/glm-5[.]2\$@model_api: $PLE_MODEL_API@" "$entry/submission.yaml"
+              if [[ "$PLE_MODEL_API" == openai-compatible/* ]]; then
+                printf '\nmodel_base_url: https://llm.example.org/v1\n' >> "$entry/submission.yaml"
+              fi
+              git -C "$entry" add submission.yaml
+              git -C "$entry" -c user.name='PLE Cloud Pilot' -c user.email='pilot@users.noreply.github.com' \
+                commit --quiet -m 'Select the model for this development run'
+              ;;
+            google-cloud/glm-5.2) ;;
+            *) echo 'Unexpected pilot model.'; exit 1 ;;
+          esac
+          printf 'PLE_EVAL_ENTRY=%s\nPLE_EVAL_MODEL_API=%s\n' "$entry" "$PLE_MODEL_API" >> "$GITHUB_ENV"
+          cd "$RUNNER_TEMP/ple-official"
+          uv run python -m kit validate "$entry"
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+
+      - name: Run and score one official checks-only task
+        if: steps.entry_preparation.outputs.ready == 'true'
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ steps.hosted_model.outputs.model_api == 'openai/gpt-6.1-sol' && secrets.PLE_OPENAI_API_KEY || '' }}
           HF_HUB_DISABLE_TELEMETRY: '1'
-          PLE_REFRESH_HF_OIDC: ${{ steps.model_selection.outputs.uses_oidc == 'true' }}
+          PLE_REFRESH_HF_OIDC: ${{ steps.hosted_model.outputs.uses_oidc == 'true' }}
         run: |
           if [[ "$PLE_REFRESH_HF_OIDC" == true ]]; then
             (
@@ -298,11 +351,18 @@ jobs:
           mkdir -p "$UV_TOOL_BIN_DIR"
           export PATH="$UV_TOOL_BIN_DIR:$PATH"
           env -u OPENAI_API_KEY -u MODEL_PROXY_KEY uv tool install harbor==0.20.0 --with websockets
+          model_args=()
+          if [[ "$PLE_EVAL_MODEL_API" == openai-compatible/* ]]; then
+            model_args=(--model-base-url "$MODEL_PROXY_URL/v1")
+            export MODEL_API_KEY="$MODEL_PROXY_KEY"
+            unset MODEL_PROXY_URL MODEL_PROXY_KEY
+          fi
           out="$RUNNER_TEMP/ple-pilot"
           log="$RUNNER_TEMP/ple-pilot.log"
           status=0
           uv run python eval/run.py "$PLE_EVAL_ENTRY" --tasks wind-diaphragm-shear \
-            --tasks-dir "$PLE_TASKS_DIR" --trials 1 --attempts 1 --no-export --out "$out" >"$log" 2>&1 || status=$?
+            --tasks-dir "$PLE_TASKS_DIR" --trials 1 --attempts 1 --no-export --out "$out" \
+            "${model_args[@]}" >"$log" 2>&1 || status=$?
 
           python3 - "$out/results.json" "$log" "$status" "$PLE_EVAL_MODEL_API" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
           import json
@@ -338,3 +398,12 @@ jobs:
               print(f"Official evaluator exited {exit_status} after recording the score.")
               raise SystemExit(1)
           PY
+
+      - name: Stop local model processes
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          for pid_file in "$RUNNER_TEMP/ple-relay.pid" "$RUNNER_TEMP/ple-cpu/server.pid"; do
+            if [[ -s "$pid_file" ]]; then kill "$(cat "$pid_file")" 2>/dev/null || true; fi
+          done
