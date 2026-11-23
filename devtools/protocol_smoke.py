@@ -13,6 +13,7 @@ import socket
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import websockets
@@ -67,6 +68,52 @@ async def check_python_output():
         with patch.object(transport, "exec", AsyncMock(return_value=truncated)):
             assert "stdout was truncated" in await run_python("print('{\"count\": 9}')")
         assert output.read_bytes() == b'{"count": 7}\n'
+
+
+async def check_mcp_results():
+    url = "http://127.0.0.1:8123/tools"
+    transport = SimpleNamespace(http=AsyncMock())
+    harness = Harness(transport, None, "Read the latest measurement.", mcp_servers=[
+        {"name": "measurements", "url": url, "transport": "streamable-http"},
+    ])
+    request = {"jsonrpc": "2.0", "id": 17, "method": "tools/call", "params": {"name": "latest"}}
+    measured = {"content": [{"type": "text", "text": "Measured value: 4.25"}],
+                "structuredContent": {"unit": "m"}}
+    reply = {"jsonrpc": "2.0", "id": 17, "result": measured}
+
+    async def call(raw, status=200, content_type="application/json", rpc=request, truncated=False):
+        transport.http.return_value = {
+            "ok": True, "status": status, "truncated": truncated,
+            "headers": {"Content-Type": content_type, "Mcp-Session-Id": "synthetic-id"},
+            "body_b64": base64.b64encode(raw.encode()).decode(),
+        }
+        return await harness._do({"name": "mcp_call", "arguments": {"url": url, "body": json.dumps(rpc)}})
+
+    sse = (": comment\r\nevent: message\r\ndata: {\r\n"
+           f"data: \"jsonrpc\": \"2.0\", \"id\": 17, \"result\": {json.dumps(measured)}\r\n"
+           "data: }\r\n\r\n")
+    for result in [await call(json.dumps(reply)), await call(sse, content_type="text/event-stream; charset=utf-8")]:
+        assert result.startswith("MCP tool result content (latest):\nMeasured value: 4.25\n"), result
+        assert 'Structured content: {"unit": "m"}' in result, result
+        assert "Mcp-Session-Id: synthetic-id\n[raw MCP response]" in result, result
+
+    batch = [request, {**request, "id": "17", "params": {"name": "secondary"}}]
+    both = await call(json.dumps([{**reply, "id": "17"}, reply]), rpc=batch)
+    assert both.startswith("MCP tool result content (latest):") and "MCP tool result content (secondary):" in both
+
+    for invalid in [{**reply, "id": "17"}, {**reply, "id": 999},
+                    {**reply, "result": {**measured, "isError": True}},
+                    {"jsonrpc": "2.0", "id": 17, "error": {"message": "server could not read"}}]:
+        result = await call(json.dumps(invalid))
+        assert "No confirmed tool result content." in result.splitlines()[0], result
+        assert "[raw MCP response]\n" + json.dumps(invalid) in result, result
+
+    result = await call(json.dumps(reply), status=202)
+    assert result.startswith("MCP HTTP 202 acknowledgement. No tool result content."), result
+    result = await call(json.dumps(reply), truncated=True)
+    assert "No confirmed tool result content." in result.splitlines()[0] and "[HTTP response body truncated]" in result
+    partial = await call(sse.rstrip() + "\r\n", content_type="text/event-stream")
+    assert "No confirmed tool result content." in partial.splitlines()[0], partial
 
 
 def tool(call_id, name, **arguments):
@@ -214,6 +261,7 @@ def serve_port():
 async def main():
     check_contracts()
     await check_python_output()
+    await check_mcp_results()
     stub = MessagesStub()
     async with await asyncio.start_server(stub.handle, "127.0.0.1", 0) as server:
         stub_port = server.sockets[0].getsockname()[1]
@@ -257,7 +305,7 @@ async def main():
             output, _ = await proc.communicate()
             if output:
                 print(output.decode(errors="replace").rstrip(), file=sys.stderr)
-    print("PROTOCOL SMOKE: PASS (output contracts, Python forwarding and save, native turns, guard retry, cancel, HTTP 400)")
+    print("PROTOCOL SMOKE: PASS (output contracts, Python forwarding and save, MCP results, native turns, guard retry, cancel, HTTP 400)")
 
 
 if __name__ == "__main__":

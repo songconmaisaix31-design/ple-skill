@@ -12,6 +12,7 @@ import re
 
 from . import specgen, router
 from .guard import Guard
+from .mcp import result_excerpt
 from .model import PYTHON_SOURCE_MAX, PYTHON_TIMEOUT_DEFAULT, PYTHON_TIMEOUT_MAX
 from .transport import quote_path
 
@@ -134,7 +135,9 @@ class Harness:
                          "notifications/initialized before tools/list or tools/call. Include "
                          "the returned Mcp-Session-Id header (if present) and set the "
                          "MCP-Protocol-Version header to the initialize result's protocolVersion "
-                         "on subsequent requests. For SSE, read the JSON-RPC reply on the data lines.")
+                         "on subsequent requests. For copy tasks, use the returned MCP tool "
+                         "result content verbatim. HTTP acknowledgements and initialization "
+                         "confirmations carry no tool data.")
         parts.append("\n=== WORKSPACE SNAPSHOT (taken by the harness before you started) ===\n"
                      + snapshot)
         return "\n".join(parts)
@@ -247,8 +250,8 @@ class Harness:
             ):
                 return "[mcp_call] headers must be a mapping of strings to strings"
             hdrs.update({key.lower(): value for key, value in supplied_headers.items()})
-            r = await self.t.http(a.get("method", "POST"), a.get("url", ""), hdrs,
-                                  (a.get("body") or "").encode())
+            body = a.get("body") or ""
+            r = await self.t.http(a.get("method", "POST"), a.get("url", ""), hdrs, body.encode())
             if r.get("ok") is False and r.get("status") is None:
                 return f"[mcp_call] relay failed: {r.get('error') or 'no HTTP response'}"
 
@@ -257,11 +260,21 @@ class Harness:
             except (TypeError, ValueError):
                 txt = "[invalid HTTP response body encoding]"
 
-            result = [f"[http {r.get('status')}]"]
-            for key, value in (r.get("headers") or {}).items():
+            status = r.get("status")
+            response_headers = r.get("headers") or {}
+            content_type = next((value for key, value in response_headers.items()
+                                 if key.lower() == "content-type"), "")
+            excerpt = result_excerpt(body, txt, status, content_type, r.get("truncated", False))
+            result = [excerpt[:4096]] if excerpt else []
+            if len(excerpt) > 4096:
+                result.append("[MCP tool result display truncated]")
+            result.append(f"[http {status}]")
+            for key, value in response_headers.items():
                 if key.lower() in {"content-type", "mcp-session-id", "mcp-protocol-version"}:
                     result.append(f"{key}: {value}")
             if txt:
+                if excerpt:
+                    result.append("[raw MCP response]")
                 result.append(txt[:8000])
             if r.get("truncated") or len(txt) > 8000:
                 result.append("[HTTP response body truncated]")

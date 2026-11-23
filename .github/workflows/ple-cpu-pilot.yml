@@ -18,6 +18,8 @@ jobs:
   cpu-model:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    env:
+      VERIFY_MCP: ${{ github.event.head_commit.message == 'Check PLE tool transport on the cloud CPU' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -82,6 +84,7 @@ jobs:
           exit 1
 
       - name: Score the independent classroom mechanics diagnostic
+        if: env.VERIFY_MCP != 'true'
         continue-on-error: true
         shell: bash
         run: |
@@ -108,8 +111,13 @@ jobs:
           cd "$RUNNER_TEMP/ple-official"
           uv run python -m kit validate "$entry"
           status=0
-          uv run python -m kit check "$entry" --work "$RUNNER_TEMP/ple-kit-cpu" "${args[@]}" || status=$?
-          python3 - "$RUNNER_TEMP/ple-kit-cpu/check.json" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          work="$RUNNER_TEMP/ple-kit-cpu"
+          trials=1
+          if [[ "$VERIFY_MCP" == true ]]; then trials=2; fi
+          for ((i=1; i<=trials; i++)); do
+            rm -f "$work/check.json"
+            uv run python -m kit check "$entry" --work "$work" "${args[@]}" || status=$?
+            python3 - "$work/check.json" "$i" "$VERIFY_MCP" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY" || status=1
           import json
           from pathlib import Path
           import sys
@@ -119,10 +127,13 @@ jobs:
           except (OSError, ValueError):
               report = {}
           results = {row["name"]: row["status"] for row in report.get("stages", [])}
-          print("Official kit synthetic test stages")
+          print(f"Official kit synthetic test stages, trial {sys.argv[2]}")
           for stage in ("build", "model", "listen", "smoke", "mcp"):
               print(f"- {stage}: {results.get(stage, 'not run')}")
+          if sys.argv[3] == "true" and any(results.get(s) != "pass" for s in ("smoke", "mcp")):
+              sys.exit(1)
           PY
+          done
           exit "$status"
 
       - name: Stop the transient model server
