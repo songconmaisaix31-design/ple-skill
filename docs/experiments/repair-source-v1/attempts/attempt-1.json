@@ -1,0 +1,159 @@
+{
+  "run_id": 45232669702,
+  "run_attempt": 1,
+  "head_sha": "9c1a00a40c8e40212ea1e97c93824366889ddb8e",
+  "protocol_sha256": "0bac8efa42197211f6770f41912b3c7ea6a038b6901cfb3cdd6ca6441e827f46",
+  "evidence_sha256": "7cc6c7ed0a3b776879e72fd687aea5367baa268914b41fecfb58603eee538240",
+  "jobs": {
+    "f1": {
+      "id": 137896076896,
+      "url": "https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45232669702/job/137896076896"
+    },
+    "f2": {
+      "id": 137896077080,
+      "url": "https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45232669702/job/137896077080"
+    },
+    "f3": {
+      "id": 137896076969,
+      "url": "https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45232669702/job/137896076969"
+    },
+    "g1": {
+      "id": 137896076311,
+      "url": "https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45232669702/job/137896076311"
+    },
+    "g2": {
+      "id": 137896077025,
+      "url": "https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45232669702/job/137896077025"
+    },
+    "g3": {
+      "id": 137896077212,
+      "url": "https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45232669702/job/137896077212"
+    }
+  },
+  "coverage": {
+    "planned": 12,
+    "regraded": 11,
+    "missing_arms": 0,
+    "complete_transcripts": 11,
+    "git_sha": "9c1a00a40c8e40212ea1e97c93824366889ddb8e",
+    "verified_candidate_exposures": 0
+  },
+  "trials": [
+    {
+      "case": "f",
+      "repeat": 1,
+      "arm": "text",
+      "job_id": 137896076896,
+      "measured": true,
+      "score": 1.0,
+      "missing_reason": null
+    },
+    {
+      "case": "f",
+      "repeat": 1,
+      "arm": "text-source",
+      "job_id": 137896076896,
+      "measured": true,
+      "score": 1.0,
+      "missing_reason": null
+    },
+    {
+      "case": "f",
+      "repeat": 2,
+      "arm": "text",
+      "job_id": 137896077080,
+      "measured": true,
+      "score": 1.0,
+      "missing_reason": null
+    },
+    {
+      "case": "f",
+      "repeat": 2,
+      "arm": "text-source",
+      "job_id": 137896077080,
+      "measured": true,
+      "score": 1.0,
+      "missing_reason": null
+    },
+    {
+      "case": "f",
+      "repeat": 3,
+      "arm": "text",
+      "job_id": 137896076969,
+      "measured": true,
+      "score": 1.0,
+      "missing_reason": null
+    },
+    {
+      "case": "f",
+      "repeat": 3,
+      "arm": "text-source",
+      "job_id": 137896076969,
+      "measured": true,
+      "score": 1.0,
+      "missing_reason": null
+    },
+    {
+      "case": "g",
+      "repeat": 1,
+      "arm": "text",
+      "job_id": 137896076311,
+      "measured": true,
+      "score": 1.0,
+      "missing_reason": null
+    },
+    {
+      "case": "g",
+      "repeat": 1,
+      "arm": "text-source",
+      "job_id": 137896076311,
+      "measured": true,
+      "score": 1.0,
+      "missing_reason": null
+    },
+    {
+      "case": "g",
+      "repeat": 2,
+      "arm": "text",
+      "job_id": 137896077025,
+      "measured": true,
+      "score": 1.0,
+      "missing_reason": null
+    },
+    {
+      "case": "g",
+      "repeat": 2,
+      "arm": "text-source",
+      "job_id": 137896077025,
+      "measured": true,
+      "score": 1.0,
+      "missing_reason": null
+    },
+    {
+      "case": "g",
+      "repeat": 3,
+      "arm": "text",
+      "job_id": 137896077212,
+      "measured": true,
+      "score": 1.0,
+      "missing_reason": null
+    },
+    {
+      "case": "g",
+      "repeat": 3,
+      "arm": "text-source",
+      "job_id": 137896077212,
+      "measured": false,
+      "score": null,
+      "missing_reason": {
+        "phase": "model_start",
+        "exit_code": 1,
+        "report_present": false
+      }
+    }
+  ],
+  "pairs_requiring_full_retry": [
+    "g3"
+  ],
+  "reason_limit": "Model-start failures contain the recorded phase and exit status. No specific cause is inferred from these alone."
+}

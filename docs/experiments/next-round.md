@@ -2,7 +2,7 @@
 
 ## 当前运行状态
 
-手动轮次正在执行 `repair-source-v1`。已启动 [GitHub Actions 45232669702](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45232669702)，冻结的[运行代码](https://github.com/songconmaisaix31-design/ple-skill/tree/9c1a00a40c8e40212ea1e97c93824366889ddb8e)由六台运行器执行。新留出题 F/G 的输入哈希、分组、主要指标、三轮配对和继续条件已冻结。原有 D 的三次失败已通过离线回放，基线返回的反馈逐字一致，候选能附上第 79–83 行。下一次接手请先查 `codex/ple-cpu-cloud-pilot` 上名为 `Test source context in a fixed-seed repair ablation` 的提交和运行，已有相同轮次时沿用其运行编号。[本轮冻结协议](repair-source-v1/protocol.json)
+首次尝试已归档。F1–3、G1–2 五对完整，第 395 秒基线与候选均得 1。G3 的候选在模型启动阶段失败，未取得分数，随后基线得 1。只对 G3 启动了技术补跑，运行提交和两臂顺序保持一致。最终分析采用首次有效的整对观测。接手时先查下面的补跑，保留首次归档。[G3 第 2 次尝试](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45232669702/job/137913411809) · [完整逐次记录与六个任务编号](repair-source-v1/attempts/attempt-1.json) · [首次证据包](repair-source-v1/attempts/attempt-1-evidence.zip) · [冻结协议](repair-source-v1/protocol.json)
 
 ## 2026-11-24 本轮新增观察
 
