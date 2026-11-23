@@ -3,6 +3,7 @@
 
 import argparse
 import asyncio
+import base64
 from collections import deque
 from contextlib import asynccontextmanager, contextmanager
 import json
@@ -76,6 +77,67 @@ with os.fdopen(fd, 'rb') as source:
         sys.exit(1)
     sys.stdout.buffer.write(data)
 """
+
+# One read-only Docker invocation for both files. Times are nanosecond Unix times
+# on the Docker host/containers. Never grade inputs that changed across the cutoff.
+SNAPSHOT = """
+import base64, json, os, stat, sys
+root = os.open('/app', os.O_DIRECTORY | os.O_NOFOLLOW)
+limit, cutoff = int(sys.argv[1]), int(sys.argv[2])
+names = sys.argv[3:]
+meta, files = {}, {}
+stable = True
+try:
+    folder = os.open('output', os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root)
+except (FileNotFoundError, NotADirectoryError):
+    meta['output_directory'] = False
+    stable = os.fstat(root).st_ctime_ns <= cutoff
+else:
+    meta['output_directory'] = True
+    info = os.fstat(folder)
+    stable = info.st_ctime_ns <= cutoff
+    with os.scandir(folder) as entries:
+        meta['extras'] = any(item.name not in names for item in entries)
+    for name in names:
+        try:
+            st = os.stat(name, dir_fd=folder, follow_symlinks=False)
+        except FileNotFoundError:
+            meta[name] = 'missing'
+            continue
+        stable = stable and st.st_ctime_ns <= cutoff
+        if not stat.S_ISREG(st.st_mode) or st.st_size > limit:
+            meta[name] = 'not_regular_or_oversized'
+            continue
+        fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=folder)
+        with os.fdopen(fd,'rb') as stream:
+            data = stream.read(limit + 1)
+            final = os.fstat(fd)
+        stable = stable and (st.st_ino,st.st_ctime_ns,st.st_size) == (final.st_ino,final.st_ctime_ns,len(data))
+        meta[name] = len(data)
+        if len(data) <= limit and not meta['extras']:
+            files[name] = base64.b64encode(data).decode('ascii')
+    after = os.stat('output', dir_fd=root, follow_symlinks=False)
+    stable = stable and (info.st_ino,info.st_ctime_ns) == (after.st_ino,after.st_ctime_ns)
+print(json.dumps({'stable':stable,'inventory':meta,'files':files if stable else {}}))
+"""
+
+
+async def capture_at_cutoff(container, destination, cutoff_ns):
+    try:
+        output = await asyncio.to_thread(docker, "exec", container, "python3", "-I", "-c",
+                                         SNAPSHOT, str(LIMIT), str(cutoff_ns), *OUTPUTS, read=True)
+    except (OSError, subprocess.TimeoutExpired):
+        return {"measured": False, "reason": "snapshot reader unavailable"}, None
+    if output.returncode:
+        return {"measured": False, "reason": "snapshot reader failed"}, None
+    snapshot = json.loads(output.stdout)
+    if not snapshot["stable"]:
+        return {"measured": False, "reason": "files changed at cutoff"}, snapshot["inventory"]
+    destination.mkdir()
+    for name in OUTPUTS:
+        if name in snapshot["files"]:
+            (destination / name).write_bytes(base64.b64decode(snapshot["files"][name], validate=True))
+    return {"measured": True}, snapshot["inventory"]
 
 
 def docker(*args, read=False, data=None):
@@ -256,7 +318,7 @@ async def task_container(inputs, fixture_paths):
         await asyncio.to_thread(docker, "rm", "-f", name, read=True)
 
 
-async def measure(workspace, variant, seconds, kit_root, check_transport=False):
+async def measure(workspace, variant, seconds, kit_root, check_transport=False, checkpoint_sec=None):
     sys.path.insert(0, str(kit_root))
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import websockets
@@ -275,6 +337,7 @@ async def measure(workspace, variant, seconds, kit_root, check_transport=False):
     actions = deque(maxlen=24)
     model_attempts = deque(maxlen=24)
     first_events = {}
+    checkpoint = None
 
     class RecordingRelay(Relay):
         async def dispatch(self, request):
@@ -296,25 +359,46 @@ async def measure(workspace, variant, seconds, kit_root, check_transport=False):
                                         ping_interval=None) as server:
                 address = server.sockets[0].getsockname()
                 started = time.monotonic()
+                start_wall_ns = time.time_ns()
                 socket = await relay.connect(f"ws://127.0.0.1:{address[1]}")
                 try:
-                    outcome = await relay.run(socket, prompt)
+                    if checkpoint_sec is None:
+                        outcome = await relay.run(socket, prompt)
+                    else:
+                        session = asyncio.create_task(relay.run(socket, prompt))
+                        try:
+                            await asyncio.wait({session}, timeout=max(0, started + checkpoint_sec - time.monotonic()))
+                            completed = session.done()
+                            snapshot_start = time.monotonic() - started
+                            checkpoint, inventory = await capture_at_cutoff(
+                                name, workspace / "output", start_wall_ns + int(checkpoint_sec * 1e9))
+                            snapshot_end = time.monotonic() - started
+                            checkpoint.update(target_sec=checkpoint_sec, start_sec=round(snapshot_start, 3),
+                                              end_sec=round(snapshot_end, 3), ended_by_target=snapshot_end <= checkpoint_sec,
+                                              session_was_done=completed)
+                        finally:
+                            session.cancel()
+                            await asyncio.gather(session, return_exceptions=True)
+                        if not session.cancelled():
+                            session.result()
+                        outcome = relay.outcome
                 finally:
                     await socket.close()
                 elapsed = time.monotonic() - started
-        try:
-            metadata = await asyncio.to_thread(docker, "exec", name, "python3", "-I", "-c",
-                                               INVENTORY, *OUTPUTS, read=True)
-            inventory = json.loads(metadata.stdout) if metadata.returncode == 0 else None
-        except (ValueError, OSError, subprocess.TimeoutExpired):
-            inventory = None
         output = workspace / "output"
-        output.mkdir(exist_ok=True)
-        for filename in OUTPUTS:
-            read = await asyncio.to_thread(docker, "exec", name, "python3", "-I", "-c",
-                                          READ_OUTPUT, filename, str(LIMIT), *OUTPUTS, read=True)
-            if read.returncode == 0:
-                (output / filename).write_bytes(read.stdout)
+        if checkpoint is None:
+            try:
+                metadata = await asyncio.to_thread(docker, "exec", name, "python3", "-I", "-c",
+                                                   INVENTORY, *OUTPUTS, read=True)
+                inventory = json.loads(metadata.stdout) if metadata.returncode == 0 else None
+            except (ValueError, OSError, subprocess.TimeoutExpired):
+                inventory = None
+            output.mkdir(exist_ok=True)
+            for filename in OUTPUTS:
+                read = await asyncio.to_thread(docker, "exec", name, "python3", "-I", "-c",
+                                              READ_OUTPUT, filename, str(LIMIT), *OUTPUTS, read=True)
+                if read.returncode == 0:
+                    (output / filename).write_bytes(read.stdout)
 
     if check_transport:
         matches = {n: (output / n).is_file() and (output / n).read_bytes() == data
@@ -324,20 +408,22 @@ async def measure(workspace, variant, seconds, kit_root, check_transport=False):
                           "elapsed_sec": round(elapsed, 2), "inventory": inventory, "last_actions": list(actions)}))
         return 0 if passed else 1
 
-    result = grade(workspace, variant)
+    result = grade(workspace, variant) if checkpoint is None or checkpoint["measured"] else None
     report = {"variant": variant, "model": os.environ.get("MODEL_NAME"), "budget_sec": seconds,
               "elapsed_sec": round(elapsed, 1), "status": outcome.status, "requests": outcome.kinds,
               "tokens": outcome.usage, "grade": result, "inventory": inventory,
               "last_actions": list(actions), "final_message_chars": len(outcome.final_message),
               "done_after_cancel": outcome.done_after_cancel}
     report.update(first_events=first_events, last_model_attempts=list(model_attempts))
+    if checkpoint is not None:
+        report["checkpoint"] = checkpoint
     first_action = first_code_action(outcome.log)
     if first_action is not None:
         report["first_code_action"] = first_action
     if outcome.infra:
         report["infrastructure_error"] = True
     print(json.dumps(report, ensure_ascii=True, allow_nan=False), flush=True)
-    return 2 if outcome.infra else int(not result["optimal"])
+    return 2 if outcome.infra or result is None else int(not result["optimal"])
 
 
 def main():
@@ -349,10 +435,14 @@ def main():
     parser.add_argument("--check-transport", action="store_true",
                         help="Verify two exact file exports through the harness and Docker without a model")
     parser.add_argument("--timeout-sec", type=int, default=540)
+    parser.add_argument("--checkpoint-only-sec", type=int,
+                        help="Capture and grade at this external cutoff, then stop the session")
     parser.add_argument("--keep-dir", type=Path, help="New directory for the original inputs and two outputs")
     args = parser.parse_args()
     if not 1 <= args.timeout_sec <= 21600:
         parser.error("time budget must be between 1 and 21600 seconds")
+    if args.checkpoint_only_sec is not None and (args.check_transport or not 0 < args.checkpoint_only_sec < args.timeout_sec):
+        parser.error("--checkpoint-only-sec needs a full model run and must be shorter than --timeout-sec")
     kit = args.kit_root.resolve()
     if not (kit / "kit" / "relay.py").is_file():
         parser.error("the kit checkout must contain kit/relay.py")
@@ -364,9 +454,11 @@ def main():
         workspace = args.keep_dir.resolve()
         if workspace.exists():
             parser.error("--keep-dir must not exist")
-        return asyncio.run(measure(workspace, args.variant, args.timeout_sec, kit, args.check_transport))
+        return asyncio.run(measure(workspace, args.variant, args.timeout_sec, kit,
+                                   args.check_transport, args.checkpoint_only_sec))
     with tempfile.TemporaryDirectory(prefix="ple-design-") as temporary:
-        return asyncio.run(measure(Path(temporary) / "task", args.variant, args.timeout_sec, kit, args.check_transport))
+        return asyncio.run(measure(Path(temporary) / "task", args.variant, args.timeout_sec, kit,
+                                   args.check_transport, args.checkpoint_only_sec))
 
 
 if __name__ == "__main__":

@@ -21,10 +21,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: ${{ fromJSON(github.event.head_commit.message == 'Compare Python action strategies on cloud CPU' && '["a","b","c"]' || github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' && '["a","b"]' || '["a"]') }}
-        strategy: ${{ fromJSON(github.event.head_commit.message == 'Compare Python action strategies on cloud CPU' && '["legacy","native","text"]' || '["legacy"]') }}
+        variant: ${{ fromJSON(startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') && '["a","b","c"]' || github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' && '["a","b"]' || '["a"]') }}
+        strategy: ${{ fromJSON(startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') && '["legacy","native","text"]' || '["legacy"]') }}
     env:
-      DESIGN_BENCH: ${{ github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' || github.event.head_commit.message == 'Compare Python action strategies on cloud CPU' }}
+      DESIGN_BENCH: ${{ github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' || startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') }}
       VERIFY_MCP: ${{ startsWith(github.event.head_commit.message, 'Check PLE tool transport on the cloud CPU') }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -59,7 +59,7 @@ jobs:
         shell: bash
         env:
           PLE_CPU_EVAL_GREEDY: ${{ env.DESIGN_BENCH }}
-          PROFILE: ${{ (github.event.head_commit.message == 'Compare Python action strategies on cloud CPU' && 'gemma26') || inputs.model || (github.event.head_commit.message == 'Test Granite on the cloud CPU' && 'granite') || 'auto' }}
+          PROFILE: ${{ (startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') && 'gemma26') || inputs.model || (github.event.head_commit.message == 'Test Granite on the cloud CPU' && 'granite') || 'auto' }}
         run: |
           umask 077
           export MODEL_PROXY_URL=http://127.0.0.1:4102
@@ -115,10 +115,13 @@ jobs:
         env:
           VARIANT: ${{ matrix.variant }}
           PLE_CODE_ACTION: ${{ matrix.strategy }}
+          CHECKPOINT_ONLY: ${{ github.event.head_commit.message == 'Compare Python action strategies on cloud CPU at 395 seconds' }}
         run: |
+          timing=()
+          if [[ "$CHECKPOINT_ONLY" == true ]]; then timing=(--checkpoint-only-sec 395); fi
           MODEL_API="$PLE_CPU_MODEL_API" MODEL_NAME="$PLE_CPU_MODEL_NAME" \
             "$RUNNER_TEMP/ple-official/.venv/bin/python" devtools/run_design_regression.py \
-            --kit-root "$RUNNER_TEMP/ple-official" --variant "$VARIANT" --timeout-sec 720 | tee -a "$GITHUB_STEP_SUMMARY"
+            --kit-root "$RUNNER_TEMP/ple-official" --variant "$VARIANT" --timeout-sec 720 "${timing[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Run the official kit synthetic tasks using the real CPU model
         if: env.DESIGN_BENCH != 'true'
