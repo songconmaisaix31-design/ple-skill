@@ -18,7 +18,12 @@ jobs:
   cpu-model:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' && '["a","b"]' || '["a"]') }}
     env:
+      DESIGN_BENCH: ${{ github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' }}
       VERIFY_MCP: ${{ startsWith(github.event.head_commit.message, 'Check PLE tool transport on the cloud CPU') }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -44,6 +49,7 @@ jobs:
       - name: Start the account-free CPU model and verify a real synthetic tool call
         shell: bash
         env:
+          PLE_CPU_EVAL_GREEDY: ${{ env.DESIGN_BENCH }}
           PROFILE: ${{ inputs.model || (github.event.head_commit.message == 'Test Granite on the cloud CPU' && 'granite') || 'auto' }}
         run: |
           umask 077
@@ -84,7 +90,7 @@ jobs:
           exit 1
 
       - name: Score the independent classroom mechanics diagnostic
-        if: env.VERIFY_MCP != 'true'
+        if: env.VERIFY_MCP != 'true' && env.DESIGN_BENCH != 'true'
         continue-on-error: true
         shell: bash
         run: |
@@ -94,7 +100,19 @@ jobs:
             "$RUNNER_TEMP/ple-official/.venv/bin/python" devtools/engineering_regression.py \
             --timeout-sec 840 --checkpoint-sec 395 --docker-image "$image" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
 
+      - name: Evaluate an original storage schedule with isolated scoring
+        if: env.DESIGN_BENCH == 'true'
+        shell: bash
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          docker pull --platform linux/amd64 'python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b'
+          MODEL_API="$PLE_CPU_MODEL_API" MODEL_NAME="$PLE_CPU_MODEL_NAME" \
+            "$RUNNER_TEMP/ple-official/.venv/bin/python" devtools/run_design_regression.py \
+            --kit-root "$RUNNER_TEMP/ple-official" --variant "$VARIANT" --timeout-sec 720 | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Run the official kit synthetic tasks using the real CPU model
+        if: env.DESIGN_BENCH != 'true'
         shell: bash
         run: |
           entry="$RUNNER_TEMP/ple-cpu-entry"

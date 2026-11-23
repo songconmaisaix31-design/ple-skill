@@ -83,6 +83,10 @@ fi
 [[ -x "$server" ]]
 key_file="$state/server-api-key"
 printf '%s\n' "$MODEL_PROXY_KEY" > "$key_file"
+sampling=()
+if [[ "${PLE_CPU_EVAL_GREEDY:-false}" == true ]]; then
+  sampling=(--temp 0 --seed 17)
+fi
 threads=$(nproc)
 if (( threads > 4 )); then threads=4; fi
 
@@ -91,7 +95,7 @@ env -u HF_TOKEN -u HUGGING_FACE_HUB_TOKEN -u HF_OIDC_RESOURCE -u HF_OIDC_ID_TOKE
   nohup "$server" --model "$model" --alias "$model_name" --host 0.0.0.0 --port "$port" \
     --jinja --offline --no-webui --reasoning off --api-key-file "$key_file" \
     --ctx-size 8192 --parallel 1 --threads "$threads" --threads-batch "$threads" \
-    --gpu-layers 0 --cache-ram 0 --timeout 600 --log-disable \
+    "${sampling[@]}" --gpu-layers 0 --cache-ram 0 --timeout 600 --log-disable \
     </dev/null >"$state/server.log" 2>&1 &
 pid=$!
 printf '%s\n' "$pid" > "$state/server.pid"
