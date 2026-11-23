@@ -30,6 +30,19 @@ python devtools/design_regression.py --grade /tmp/storage-a --variant a
 
 GPT-6.1 Sol 在独立会话中只获得题面和输入，使用自行编写的计算程序。两个算例都提交了 CSV 时序和 JSON 汇总。A 的六期泵量为 4、2、2、4、0、4，总成本 92 美分。B 的六期泵量为 3、1、3、3、0、5，总成本 67 美分。独立评分器复算后，两者均可行且达到各自的全局最低成本。这是原生模型会话的结果。云端 Gemma 实验另外经过本仓库的 serve 入口、官方 WebSocket relay 和隔离的 Docker 工作区。
 
+### 云端模型对照
+
+四组运行都使用相同的 Gemma 4 26B A4B 量化权重、固定的 llama.cpp 构建、四核 CPU、零温度和相同的独立评分器。每个算例每组各运行一次，指定 720 秒的任务预算。工具、评分和模型不会读取枚举器的最优答案。评分器要求从容器导出的交付能组成恰含指定 CSV 和 JSON 的目录，然后才核对物理量和成本。
+
+| 版本 | 算例 A | 算例 B | 累计输入 token（A / B） |
+|---|---|---|---|
+| 旧验收逻辑 | 0 | 0 | 17,030 / 17,022 |
+| 增加截止前复核和文件校验 | 0 | 0 | 17,128 / 17,099 |
+| 完整识别 Markdown 列出的两个输出 | 0 | 0 | 17,243 / 17,132 |
+| 同一版本启用短提示、预读小输入并建议一次计算写出多文件 | 0 | 0 | 4,129 / 3,848 |
+
+各次评分均停在两份文件的交付要求，未产生可比较的 Gemma 方案成本。最后两组是一次成对的任务接口实验，累计输入分别减少 76.1% 和 77.5%，可行解数量都是 0/2。日志没有逐文件导出诊断，无法单凭这个分数判断具体是哪份文件缺失、目录有额外文件，还是文件类型或大小不符合导出条件。保留完整的交付物校验，精简提示分支只作为实验记录。两个算例不足以推断这种提示对其余 PLE 任务的效果。[原始基线](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45186150004) · [首次验收更新](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45186679285) · [完整校验对照](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45187585218) · [短提示实验](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45189005262)
+
 ### 独立核对最优下界
 
 另外只读取两张输入表，使用 SciPy 1.17.0 的 HiGHS 混合整数求解器重新建模。每个时段为允许的泵量建一个二元变量，各时段恰选一个。每个前缀的累计泵量减累计需求加初始库存必须处于库存上下限，最后一期再加终态限制。目标函数为各期泵量乘费率之和。A 和 B 的可行目标值和求解器给出的下界分别同为 92 和 67 美分，两次相对最优间隙均为零。[SciPy MILP 接口](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.milp.html)
@@ -38,4 +51,4 @@ GPT-6.1 Sol 在独立会话中只获得题面和输入，使用自行编写的�
 
 官方公开开发榜按 29 道题汇总，每个模型和 harness 组合运行三次。Gemma 4 26B 在所列组合中的分数为 0.007 至 0.053，GLM 5.2 配 Codex 为 0.260。公开榜的模型服务、推理设置和预算与本项目在四核 CPU 上使用的量化模型不同。正式对照要固定模型服务、模型版本、每题时间和评测器，再比较同一批题的逐题分数和产物。[开发榜](https://ple-bench.com/leaderboard?set=dev) · [官方产物规范](https://github.com/google-research/ple/blob/8320f0402fdca9f42476607f72bcfd5271cd50c9/docs/artifacts.md)
 
-正式开发题需要评测进程获得受限数据集的读取权。账户批准访问与 GitHub 运行器换到只读凭据是两个单独的步骤。Hugging Face 的账户 CI/CD identity 可给特定仓库、分支和 workflow 签发短时 `gated-repos` 凭据。CPU 路径只需要读题权限。本次运行器返回 `invalid_grant`，后续设备登录等待超时，未产生正式分数。[正式题记录](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45185198336) · [Hugging Face 身份配置说明](https://huggingface.co/docs/hub/trusted-publishers)
+正式开发题需要评测进程获得受限数据集的读取权。账户批准访问与 GitHub 运行器换到只读凭据是两个单独的步骤。Hugging Face 的账户 CI/CD identity 可给特定仓库、分支和 workflow 签发短时 `gated-repos` 凭据。CPU 路径只需要读题权限。本次运行器返回 `invalid_grant`，后续设备登录等待超时。修复后的选择器还能区分凭据缺失、拒绝和临时不可用，重新运行后记录为当前没有可用的读题凭据，未产生正式分数。[更新后复验](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45187485602)[正式题记录](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45185198336) · [Hugging Face 身份配置说明](https://huggingface.co/docs/hub/trusted-publishers)

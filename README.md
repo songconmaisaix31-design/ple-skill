@@ -4,6 +4,7 @@ Physical-Engineering's Last Exam 参赛 harness。**spec-first + 交付物守卫
 
 > **云端实测（2026-11-23）**　Gemma 4 26B A4B 在 GitHub Actions 的 CPU 上完成了自建梁受力计算题。第 395 秒通过 1/8 项，约 647 秒时通过 8/8 项，包含四个独立校验的数值。[运行日志](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45171069072)
 > **正式开发集**　已尝试运行 `wind-diaphragm-shear`。Hugging Face 对运行器的凭据交换返回 `invalid_grant`，题目下载前流程结束。当前没有本项目的官方开发集分数或参赛 `artifacts/`。[正式题运行记录](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45167261631)
+> **工程验证**　固定的 26 个有效及无效文件样本上，交付物判定从 10/26 提升到 26/26。另有独立评分的储水调度算例，验证逐时段约束与最优成本。[实验方法与结果](docs/03-validation-methods.md)
 > 下文“三项指标”衡量对主办方基线产物的离线静态回归。
 > 剩余任务、阻塞项、运行手册与合规红线见 **[HANDOFF.md](HANDOFF.md)**；评估原件见 `docs/00-接手评估.md`，修复记录见 `docs/01-修复与验证记录.md`，**F-01 处置说明见 `docs/02-合规说明.md`**。
 
