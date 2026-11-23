@@ -1,4 +1,4 @@
-name: PLE GPT cloud pilot
+name: PLE cloud model pilot
 
 on:
   push:
@@ -42,79 +42,74 @@ jobs:
           import yaml
 
           entry = yaml.safe_load(Path(sys.argv[1]).read_text())
-          if entry["model_api"] != "google-cloud/gpt-oss-120b":
-              raise SystemExit("This pilot requires the official gpt-oss-120b model ID.")
+          if entry["model_api"] != "google-cloud/glm-5.2":
+              raise SystemExit("This repository must declare the eligible GLM-5.2 model.")
           PY
 
-      - name: Verify GPT tool calls before requesting Hugging Face login
+      - name: Select and verify the configured cloud model
+        id: model_selection
+        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' }}
         shell: bash
+        env:
+          PLE_OPENAI_API_KEY: ${{ secrets.PLE_OPENAI_API_KEY }}
+          PLE_HF_INFERENCE_TOKEN: ${{ secrets.PLE_HF_INFERENCE_TOKEN || secrets.PLE_HF_TOKEN }}
         run: |
+          python="$RUNNER_TEMP/ple-official/.venv/bin/python"
+          if [[ -n "$PLE_OPENAI_API_KEY" ]] && \
+             MODEL_API=openai/gpt-6.1-sol MODEL_NAME=gpt-6.1-sol \
+             MODEL_BASE_URL=https://api.openai.com/v1 MODEL_API_KEY="$PLE_OPENAI_API_KEY" \
+             "$python" -m devtools.cloud_model_probe; then
+            echo 'model_api=openai/gpt-6.1-sol' >> "$GITHUB_OUTPUT"
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ -z "$PLE_HF_INFERENCE_TOKEN" ]]; then
+            echo 'Pilot waiting for a usable OpenAI API key or Hugging Face inference token.' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
           umask 077
           export MODEL_PROXY_URL=http://127.0.0.1:4101
           MODEL_PROXY_KEY=$(openssl rand -hex 24)
           export MODEL_PROXY_KEY
           printf '::add-mask::%s\n' "$MODEL_PROXY_KEY"
           printf 'MODEL_PROXY_URL=%s\nMODEL_PROXY_KEY=%s\n' "$MODEL_PROXY_URL" "$MODEL_PROXY_KEY" >> "$GITHUB_ENV"
-          nohup python3 devtools/gpt_cloud_relay.py </dev/null >"$RUNNER_TEMP/ple-relay.log" 2>&1 &
+          env -u PLE_OPENAI_API_KEY nohup python3 devtools/gpt_cloud_relay.py \
+            </dev/null >"$RUNNER_TEMP/ple-relay.log" 2>&1 &
           curl --max-time 5 --fail --silent --retry 8 --retry-connrefused --retry-delay 1 "$MODEL_PROXY_URL/ready" >/dev/null
+          MODEL_API=google-cloud/glm-5.2 MODEL_NAME=glm-5.2 \
+            MODEL_BASE_URL="$MODEL_PROXY_URL/v1" MODEL_API_KEY="$MODEL_PROXY_KEY" \
+            "$python" -m devtools.cloud_model_probe
+          echo 'model_api=google-cloud/glm-5.2' >> "$GITHUB_OUTPUT"
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
 
-          python3 - <<'PY'
-          import json
-          import os
-          import time
-          from urllib.error import HTTPError, URLError
-          from urllib.request import Request, urlopen
-
-          payload = {
-              "model": "gpt-oss-120b",
-              "messages": [{"role": "user", "content": "Call hello with the name Ada."}],
-              "max_tokens": 256,
-              "reasoning_effort": "low",
-              "tools": [{"type": "function", "function": {
-                  "name": "hello", "description": "Greet a person",
-                  "parameters": {"type": "object", "properties": {
-                      "name": {"type": "string"}}, "required": ["name"]},
-              }}],
-              "tool_choice": "auto",
-          }
-          request = Request(os.environ["MODEL_PROXY_URL"] + "/v1/chat/completions",
-                            json.dumps(payload).encode(),
-                            {"Content-Type": "application/json", "Authorization": "Bearer " + os.environ["MODEL_PROXY_KEY"]})
-          delays = (35, 65, 95, 120)
-          for attempt in range(len(delays) + 1):
-              try:
-                  with urlopen(request, timeout=255) as response:
-                      output = json.load(response)
-                  break
-              except HTTPError as exc:
-                  if attempt == len(delays) or exc.code not in (429, 500, 502, 503, 504):
-                      raise SystemExit(f"GPT tool-call probe failed with HTTP {exc.code}.") from None
-                  retry_after = (exc.headers.get("Retry-After") or "").strip()
-                  upstream_wait = int(retry_after) if retry_after.isascii() and retry_after.isdigit() else 0
-                  if upstream_wait > 120:
-                      raise SystemExit(f"GPT provider requested a cooldown of {upstream_wait} seconds.") from None
-                  delay = max(delays[attempt], upstream_wait)
-                  print(f"GPT probe received HTTP {exc.code}. Retrying in {delay} seconds.", flush=True)
-                  time.sleep(delay)
-              except (URLError, TimeoutError):
-                  if attempt == len(delays):
-                      raise SystemExit("GPT tool-call probe timed out.") from None
-                  time.sleep(delays[attempt])
-          try:
-              calls = output["choices"][0]["message"]["tool_calls"]
-              valid = output["model"] == "gpt-oss-120b" and any(
-                  call["function"]["name"] == "hello" and
-                  json.loads(call["function"]["arguments"]) == {"name": "Ada"} for call in calls)
-          except (KeyError, TypeError, ValueError, IndexError):
-              valid = False
-          if not valid:
-              raise SystemExit("GPT tool-call probe did not return the expected synthetic tool call.")
-          print("gpt-oss-120b synthetic tool-call probe passed.")
-          PY
+      - name: Validate the selected evaluation entry
+        if: steps.model_selection.outputs.ready == 'true'
+        shell: bash
+        env:
+          PLE_MODEL_API: ${{ steps.model_selection.outputs.model_api }}
+        run: |
+          entry="$GITHUB_WORKSPACE"
+          case "$PLE_MODEL_API" in
+            openai/gpt-6.1-sol)
+              entry="$RUNNER_TEMP/ple-sol-entry"
+              git clone --quiet "$GITHUB_WORKSPACE" "$entry"
+              sed -i 's@^model_api: google-cloud/glm-5[.]2$@model_api: openai/gpt-6.1-sol@' "$entry/submission.yaml"
+              git -C "$entry" add submission.yaml
+              git -C "$entry" -c user.name='PLE Cloud Pilot' -c user.email='pilot@users.noreply.github.com' \
+                commit --quiet -m 'Use GPT-6.1 Sol for this development run'
+              ;;
+            google-cloud/glm-5.2) ;;
+            *) echo 'Unexpected pilot model.'; exit 1 ;;
+          esac
+          printf 'PLE_EVAL_ENTRY=%s\nPLE_EVAL_MODEL_API=%s\n' "$entry" "$PLE_MODEL_API" >> "$GITHUB_ENV"
+          cd "$RUNNER_TEMP/ple-official"
+          uv run python -m kit validate "$entry"
 
       - name: Prepare Hugging Face device authorization for this runner
         id: hf_device
-        if: ${{ github.event.head_commit.message == 'Start authorized GPT cloud pilot' }}
+        if: ${{ steps.model_selection.outputs.ready == 'true' && github.event.head_commit.message == 'Start authorized cloud model pilot' }}
         shell: bash
         env:
           HF_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
@@ -163,6 +158,7 @@ jobs:
 
       - name: Verify access to the official PLE dataset
         id: dataset_access
+        if: steps.model_selection.outputs.ready == 'true'
         shell: bash
         env:
           HF_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
@@ -204,6 +200,7 @@ jobs:
         shell: bash
         env:
           HF_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
+          OPENAI_API_KEY: ${{ steps.model_selection.outputs.model_api == 'openai/gpt-6.1-sol' && secrets.PLE_OPENAI_API_KEY || '' }}
           HF_HUB_DISABLE_TELEMETRY: '1'
         run: |
           cd "$RUNNER_TEMP/ple-official"
@@ -214,16 +211,16 @@ jobs:
           out="$RUNNER_TEMP/ple-pilot"
           log="$RUNNER_TEMP/ple-pilot.log"
           status=0
-          uv run python eval/run.py "$GITHUB_WORKSPACE" --tasks wind-diaphragm-shear \
+          uv run python eval/run.py "$PLE_EVAL_ENTRY" --tasks wind-diaphragm-shear \
             --trials 1 --attempts 1 --no-export --out "$out" >"$log" 2>&1 || status=$?
 
-          python3 - "$out/results.json" "$log" "$status" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 - "$out/results.json" "$log" "$status" "$PLE_EVAL_MODEL_API" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
           import json
           import math
           import sys
           from pathlib import Path
 
-          result_path, log_path, exit_status = sys.argv[1:]
+          result_path, log_path, exit_status, expected_model = sys.argv[1:]
           if not Path(result_path).is_file():
               log = Path(log_path).read_text(errors="replace").lower()
               if "no space left" in log:
@@ -237,7 +234,7 @@ jobs:
               print(f"wind-diaphragm-shear: unmeasured ({issue}; exit {exit_status}).")
               raise SystemExit(1)
           result = json.loads(Path(result_path).read_text())
-          if result.get("model") != "google-cloud/gpt-oss-120b":
+          if result.get("model") != expected_model:
               raise SystemExit("Evaluation report has an unexpected model ID.")
           task = next((row for row in result["tasks"] if row["id"] == "wind-diaphragm-shear"), None)
           if not task or not task.get("measured"):

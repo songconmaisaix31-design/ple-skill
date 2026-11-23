@@ -231,6 +231,8 @@ class Harness:
             turn = {"role": "assistant", "content": resp.get("content", ""), "tool_calls": calls}
             if "anthropic_content" in resp:
                 turn["anthropic_content"] = resp["anthropic_content"]
+            if "responses_output" in resp:
+                turn["responses_output"] = resp["responses_output"]
             messages.append(turn)
 
             if not calls:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Model client. One OpenAI-compatible path, one Anthropic-native path.
+"""Model client for Chat Completions, Responses, and Anthropic Messages.
 
 The Anthropic path exists for one reason: prompt caching. Leaked into the
 96%-cached-prompt profile of the dev tasks, an uncached harness pays
@@ -108,6 +108,21 @@ class ModelClient:
             out.append(d)
         return out
 
+    def _to_responses(self, messages):
+        items = []
+        for message in messages:
+            role = message["role"]
+            if role == "tool":
+                items.append({"type": "function_call_output", "call_id": message["tool_call_id"],
+                              "output": message.get("content") or ""})
+            elif role == "assistant":
+                # Stateless Responses requires the original output items, especially
+                # the encrypted reasoning that accompanies function calls.
+                items.extend(message["responses_output"])
+            else:
+                items.append({"role": role, "content": message.get("content") or ""})
+        return items
+
     async def chat(self, messages, system, tools=None):
         tools = tools or TOOLS
         payload = await self._request(messages, system, tools)
@@ -127,6 +142,16 @@ class ModelClient:
                     "messages": self._to_anthropic(messages),
                     "tools": [{"name": t["name"], "description": t["description"],
                                "input_schema": t["parameters"]} for t in tools]}
+        elif self.mode == "responses":
+            url = self.base_url + ("/responses" if self.base_url.endswith("/v1") else "/v1/responses")
+            headers["authorization"] = "Bearer " + (self.api_key or "")
+            body = {"model": self.model, "max_output_tokens": self.max_tokens,
+                    "instructions": system, "input": self._to_responses(messages),
+                    "tools": [{"type": "function", **t, "strict": False} for t in tools],
+                    "tool_choice": "auto", "store": False,
+                    "include": ["reasoning.encrypted_content"]}
+            if self.reasoning_effort:
+                body["reasoning"] = {"effort": self.reasoning_effort}
         else:
             url = self.base_url + "/chat/completions" if self.base_url.endswith("/v1") \
                 else self.base_url + "/v1/chat/completions"
@@ -170,6 +195,26 @@ class ModelClient:
             usage = {"input_tokens": (u.get("input_tokens", 0) or 0) + cache_write + cache_read,
                      "output_tokens": u.get("output_tokens", 0),
                      "cache_read_tokens": cache_read}
+        elif self.mode == "responses":
+            if data.get("status") == "failed":
+                error = data.get("error") or {}
+                raise RuntimeError(f"Responses API failed: {error.get('code') or 'unknown error'}")
+            items = data.get("output") or []
+            text = "".join(part.get("text", "") for item in items if item.get("type") == "message"
+                           for part in item.get("content") or [] if part.get("type") == "output_text")
+            calls = []
+            for item in items:
+                if item.get("type") != "function_call":
+                    continue
+                try:
+                    args = json.loads(item.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                calls.append({"id": item["call_id"], "name": item["name"], "arguments": args})
+            u = data.get("usage") or {}
+            usage = {"input_tokens": u.get("input_tokens", 0) or 0,
+                     "output_tokens": u.get("output_tokens", 0) or 0,
+                     "cache_read_tokens": (u.get("input_tokens_details") or {}).get("cached_tokens", 0) or 0}
         else:
             ch = (data.get("choices") or [{}])[0].get("message") or {}
             text = ch.get("content") or ""
@@ -191,6 +236,8 @@ class ModelClient:
         result = {"content": text, "tool_calls": calls, "usage": usage}
         if self.mode == "anthropic":
             result["anthropic_content"] = blocks
+        elif self.mode == "responses":
+            result["responses_output"] = items
         return result
 
 
@@ -199,11 +246,13 @@ def from_env(log=None):
     model = os.environ.get("MODEL_NAME") or api.split("/")[-1] or "unknown"
     base = os.environ.get("MODEL_BASE_URL") or ""
     key = os.environ.get("MODEL_API_KEY") or ""
-    mode = "openai"
+    mode = "responses" if model == "gpt-6.1-sol" else "openai"
     if "claude" in model.lower() and os.environ.get("ANTHROPIC_BASE_URL"):
         base = os.environ["ANTHROPIC_BASE_URL"]
         key = os.environ.get("ANTHROPIC_API_KEY") or key
         mode = "anthropic"
     if not base:
         base = os.environ.get("OPENAI_BASE_URL", "")
+    if mode == "responses" and not key:
+        key = os.environ.get("OPENAI_API_KEY", "")
     return ModelClient(model, base, key, mode=mode, log=log)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host-local adapter from the PLE model interface to OVHcloud's anonymous GPT endpoint."""
+"""Host-local adapter for GLM-5.2 on Hugging Face Inference Providers."""
 
 from datetime import timezone
 from email.utils import parsedate_to_datetime
@@ -14,11 +14,15 @@ from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-MODEL = "gpt-oss-120b"
-UPSTREAM = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions"
+MODEL = "glm-5.2"
+HF_MODEL = "zai-org/GLM-5.2"
+PROVIDER_MODEL = "zai-org/GLM-5.2:deepinfra"
+UPSTREAM = "https://router.huggingface.co/v1/chat/completions"
+REQUEST_FIELDS = ("messages", "tools", "tool_choice", "reasoning_effort", "max_tokens",
+                  "max_completion_tokens", "temperature", "stream")
 PATH = "/v1/chat/completions"
 MAX_BODY = 8 * 1024 * 1024
-CALL_INTERVAL = 31
+DEFAULT_RETRY_DELAY = 31
 MAX_LOCAL_WAIT = 120
 LOCK = threading.Lock()
 NEXT_CALL = 0.0
@@ -31,42 +35,60 @@ class NoRedirect(HTTPRedirectHandler):
 
 def retry_delay(header):
     if not header:
-        return CALL_INTERVAL
+        return DEFAULT_RETRY_DELAY
     value = header.strip()
     if value.isascii() and value.isdecimal():
         digits = value.lstrip("0") or "0"
-        return max(CALL_INTERVAL, int(digits)) if len(digits) <= 9 else inf
+        return max(DEFAULT_RETRY_DELAY, int(digits)) if len(digits) <= 9 else inf
     try:
         deadline = parsedate_to_datetime(value)
         if deadline.tzinfo is None:
             deadline = deadline.replace(tzinfo=timezone.utc)
-        return max(CALL_INTERVAL, ceil(deadline.timestamp() - time.time()))
+        return max(DEFAULT_RETRY_DELAY, ceil(deadline.timestamp() - time.time()))
     except (OverflowError, OSError, TypeError, ValueError):
-        return CALL_INTERVAL
+        return DEFAULT_RETRY_DELAY
 
 
 def rate_limited(delay):
     # The advertised delay is bounded, but the relay retains the full cooldown.
-    return 429, b'{"error":"GPT provider HTTP 429"}', ceil(min(delay, 86400))
+    return 429, b'{"error":"Hugging Face inference HTTP 429"}', ceil(min(delay, 86400))
 
 
-def forward(payload):
+def normalize_response(body):
+    try:
+        result = json.loads(body)
+    except ValueError:
+        return None
+    if not isinstance(result, dict) or result.get("model") not in (MODEL, HF_MODEL, PROVIDER_MODEL):
+        return None
+    result["model"] = MODEL
+    return json.dumps(result, separators=(",", ":")).encode()
+
+
+def forward(payload, inference_token):
     global NEXT_CALL
 
-    payload.setdefault("reasoning_effort", "high")
-    request = Request(UPSTREAM, json.dumps(payload).encode(), {"Content-Type": "application/json"})
+    body = {field: payload[field] for field in REQUEST_FIELDS if field in payload}
+    body["model"] = PROVIDER_MODEL
+    request = Request(UPSTREAM, json.dumps(body).encode(), {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {inference_token}",
+    })
     with LOCK:
         delay = NEXT_CALL - time.monotonic()
         if delay > MAX_LOCAL_WAIT:
             return rate_limited(delay)
         time.sleep(max(0, delay))
-        NEXT_CALL = time.monotonic() + CALL_INTERVAL
 
         try:
             with build_opener(NoRedirect()).open(request, timeout=120) as response:
                 body = response.read(MAX_BODY + 1)
                 if len(body) <= MAX_BODY:
-                    return response.status, body, None
+                    body = normalize_response(body)
+                    if body is None:
+                        return 502, b'{"error":"Hugging Face response did not match GLM-5.2"}', None
+                    if len(body) <= MAX_BODY:
+                        return response.status, body, None
         except HTTPError as exc:
             with exc:
                 if exc.code == 429:
@@ -74,10 +96,10 @@ def forward(payload):
                     NEXT_CALL = max(NEXT_CALL, time.monotonic() + delay)
                     return rate_limited(delay)
                 if 400 <= exc.code <= 599:
-                    return exc.code, json.dumps({"error": f"GPT provider HTTP {exc.code}"}).encode(), None
+                    return exc.code, json.dumps({"error": f"Hugging Face inference HTTP {exc.code}"}).encode(), None
         except OSError:
             pass
-    return 502, b'{"error":"GPT provider connection or response failed"}', None
+    return 502, b'{"error":"Hugging Face inference connection or response failed"}', None
 
 
 class Relay(BaseHTTPRequestHandler):
@@ -120,16 +142,23 @@ class Relay(BaseHTTPRequestHandler):
             self.send_json(400, b'{"error":"invalid request body"}')
             return
         if not isinstance(payload, dict) or payload.get("model") != MODEL or payload.get("stream"):
-            self.send_json(400, b'{"error":"only non-streaming gpt-oss-120b is available"}')
+            self.send_json(400, b'{"error":"only non-streaming glm-5.2 is available"}')
             return
-        self.send_json(*forward(payload))
+        self.send_json(*forward(payload, self.server.inference_token))
 
 
 def main():
+    proxy_key = os.environ.get("MODEL_PROXY_KEY", "")
+    if not proxy_key:
+        raise SystemExit("MODEL_PROXY_KEY must not be empty")
+    token = os.environ.get("PLE_HF_INFERENCE_TOKEN", "").strip()
+    if not token or not token.isascii() or not token.isprintable() or " " in token:
+        raise SystemExit("PLE_HF_INFERENCE_TOKEN must contain a valid bearer token")
+    if hmac.compare_digest(proxy_key.encode(), token.encode()):
+        raise SystemExit("The relay and inference credentials must be separate")
     with ThreadingHTTPServer(("0.0.0.0", 4101), Relay) as server:
-        server.proxy_key = os.environ["MODEL_PROXY_KEY"]
-        if not server.proxy_key:
-            raise SystemExit("MODEL_PROXY_KEY must not be empty")
+        server.proxy_key = proxy_key
+        server.inference_token = token
         server.serve_forever()
 
 
