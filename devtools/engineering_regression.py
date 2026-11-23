@@ -82,7 +82,19 @@ class ExerciseTransport(LocalTransport):
         self.input_read = False
         self.calculations = 0
 
+    def task_path(self, path):
+        if not isinstance(path, str) or ".." in Path(path).parts:
+            return None
+        candidate = Path(path)
+        if candidate.is_absolute():
+            for root in (self.workspace, Path("/app")):
+                if candidate.is_relative_to(root):
+                    return candidate.relative_to(root).as_posix()
+            return None
+        return candidate.as_posix()
+
     async def read_file(self, path):
+        path = self.task_path(path)
         if path not in {INPUT, OUTPUT}:
             return None
         content = await super().read_file(path)
@@ -91,8 +103,10 @@ class ExerciseTransport(LocalTransport):
         return content
 
     async def write_file(self, path, data, append=False):
-        if path != OUTPUT and Path(path) not in self.guard_paths:
-            return failure("unknown exercise path")
+        if Path(path) not in self.guard_paths:
+            path = self.task_path(path)
+            if path != OUTPUT:
+                return failure("unknown exercise path")
         target = (self.workspace / path).resolve()
         if not target.is_relative_to(self.workspace):
             return failure("exercise path is outside the workspace")
@@ -175,8 +189,9 @@ class ExerciseTransport(LocalTransport):
 class ExerciseModel:
     """Allow only the exercise tools, even if the provider emits other calls."""
 
-    def __init__(self, client, docker_image=None):
+    def __init__(self, client, transport, docker_image=None):
         self.client = client
+        self.transport = transport
         self.tools = list(EXERCISE_TOOLS)
         if docker_image:
             self.tools.append(CALCULATOR_TOOL)
@@ -198,7 +213,12 @@ class ExerciseModel:
         for call in response["tool_calls"]:
             arguments = call["arguments"]
             if call["name"] == "write_file" and (
-                not isinstance(arguments, dict) or arguments.get("path") != OUTPUT
+                not isinstance(arguments, dict) or self.transport.task_path(arguments.get("path")) != OUTPUT
+            ):
+                call["name"] = "unavailable_exercise_path"
+            elif call["name"] == "run_python" and isinstance(arguments, dict) and (
+                arguments.get("output_path") is not None
+                and self.transport.task_path(arguments["output_path"]) != OUTPUT
             ):
                 call["name"] = "unavailable_exercise_path"
             elif call["name"] not in self.tool_names:
@@ -262,7 +282,7 @@ def score(workspace, input_read):
     return checks
 
 
-async def run(timeout, docker_image=None):
+async def run(timeout, docker_image=None, checkpoint_sec=None):
     client = from_env()
     if client.model == "unknown" or not client.base_url:
         raise SystemExit("Set MODEL_NAME and MODEL_BASE_URL for the live regression.")
@@ -277,14 +297,25 @@ async def run(timeout, docker_image=None):
         instruction = TASK
         if docker_image:
             instruction += "Use the isolated Python calculator to determine or verify your numbers before writing.\n"
-        harness = Harness(transport, ExerciseModel(client, docker_image), instruction, workdir=str(workspace))
+        harness = Harness(transport, ExerciseModel(client, transport, docker_image), instruction, workdir=str(workspace))
+        def grade():
+            checks = score(workspace, transport.input_read)
+            if docker_image:
+                checks["isolated_calculation"] = transport.calculations > 0
+            return checks
+
+        started = time.monotonic()
+        task = asyncio.create_task(harness.run(timeout_sec=timeout))
         try:
-            await harness.run(timeout_sec=timeout)
+            if checkpoint_sec:
+                await asyncio.wait({task}, timeout=checkpoint_sec)
+                interim = grade()
+                print(f"Checkpoint at {time.monotonic() - started:.1f}s: "
+                      f"{sum(interim.values())}/{len(interim)} checks passed.", flush=True)
+            await task
         except Exception as error:
             print(f"Synthetic exercise stopped before completion ({type(error).__name__}).", file=sys.stderr)
-        checks = score(workspace, transport.input_read)
-        if docker_image:
-            checks["isolated_calculation"] = transport.calculations > 0
+        checks = grade()
         points = sum(checks.values())
         print(f"Synthetic beam regression: {points}/{len(checks)} checks passed; "
               f"model turns: {harness.steps}; completed isolated calculations: {transport.calculations}.")
@@ -296,11 +327,14 @@ async def run(timeout, docker_image=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--timeout-sec", type=int, default=180)
+    parser.add_argument("--checkpoint-sec", type=int, help="Record an intermediate score before the final grade")
     parser.add_argument("--docker-image", help="Locally installed Python image for isolated calculations")
     args = parser.parse_args()
     if args.timeout_sec < 1:
         parser.error("--timeout-sec must be positive")
-    return asyncio.run(run(args.timeout_sec, args.docker_image))
+    if args.checkpoint_sec is not None and not 0 < args.checkpoint_sec < args.timeout_sec:
+        parser.error("--checkpoint-sec must be positive and shorter than --timeout-sec")
+    return asyncio.run(run(args.timeout_sec, args.docker_image, args.checkpoint_sec))
 
 
 if __name__ == "__main__":

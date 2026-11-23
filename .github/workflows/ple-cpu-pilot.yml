@@ -89,7 +89,7 @@ jobs:
           docker pull --platform linux/amd64 "$image"
           MODEL_API="$PLE_CPU_MODEL_API" MODEL_NAME="$PLE_CPU_MODEL_NAME" \
             "$RUNNER_TEMP/ple-official/.venv/bin/python" devtools/engineering_regression.py \
-            --timeout-sec 420 --docker-image "$image" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+            --timeout-sec 840 --checkpoint-sec 395 --docker-image "$image" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Run the official kit synthetic tasks using the real CPU model
         shell: bash

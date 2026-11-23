@@ -7,6 +7,8 @@ guard-driven iteration until the guard passes or time runs out.
 """
 import asyncio
 import base64
+import json
+import re
 
 from . import specgen, router
 from .guard import Guard
@@ -16,6 +18,11 @@ from .transport import quote_path
 MAX_STEPS = 240
 HARD_BUDGET = 0.94      # fraction of agent_timeout_sec we allow ourselves
 WRAP_BUDGET = 0.80      # switch to "close it out" mode
+
+NAMED_TEXT_INPUT = re.compile(
+    r"(?<![\w./-])(?:\./)?(inputs?/(?:[\w-]+/)*[\w.-]+\.(?:json|csv|txt))"
+    r"(?=$|[\s`\"'(),.;:])", re.IGNORECASE,
+)
 
 SYSTEM_BASE = """You are an agent harness solving one engineering task inside a sandboxed container.
 
@@ -43,6 +50,9 @@ Tool notes:
 - exec keeps only filesystem state; cd and shell variables do not persist.
 - Use run_python for multistep numerical calculations. Group related calculations in a
   short invocation and print the resulting quantities and checks you need for the deliverable.
+- For a single explicit text deliverable, print its complete contents and set output_path
+  in the first run_python calculation so the tool calculates and saves it in one call.
+  When setting output_path, send any diagnostics to stderr.
 - write_file creates parent directories. Use append for large files.
 - Build docx/xlsx with python-docx/openpyxl scripts you write, then run them with exec.
 """
@@ -89,18 +99,22 @@ class Harness:
         self._ctx = router.load_context(self.route["domain"])
 
     # ---------- prompt ----------
-    def _system(self, snapshot):
+    def _single_data_file(self):
         path = self.spec.get("deliverable") or ""
-        single_data_file = (
+        return (
             path.lower().endswith((".json", ".csv", ".txt"))
             and len(self.spec.get("all_named_files") or []) <= 1
             and (self.spec.get("claimed_count") or 1) == 1
         )
+
+    def _system(self, snapshot):
+        single_data_file = self._single_data_file()
         if single_data_file:
             parts = [
-                "Deliver the single requested file in the task workspace. Read the named inputs. "
-                "For a calculation, call run_python with a short program and print the results. "
-                "Use the returned values to write the file immediately. Verify the exact path, "
+                "Deliver the requested file in the task workspace. Use the file contents already "
+                "supplied and read any other named inputs. For a calculation, call run_python "
+                "with a short program that prints exactly the requested file contents. Set "
+                "output_path to the destination so the tool calls write_file on successful completion. Verify the exact path, "
                 "field names and units against the task, then call finish. "
                 "Use the available tools directly and keep the response concise."
             ]
@@ -143,10 +157,38 @@ class Harness:
         return out
 
     # ---------- tools ----------
+    async def _save_python_output(self, path, execution):
+        if not execution.get("ok") or execution.get("exit_code") != 0 or execution.get("timed_out"):
+            return "[run_python] no file saved: execution did not complete successfully"
+        if execution.get("truncated"):
+            return "[run_python] no file saved: stdout was truncated"
+        output = execution.get("output") or ""
+        if not output.strip():
+            return "[run_python] no file saved: stdout was empty"
+        if path.lower().endswith(".json"):
+            def reject_constant(token):
+                raise ValueError(f"invalid JSON constant {token}")
+
+            try:
+                json.loads(output, parse_constant=reject_constant)
+            except (ValueError, RecursionError):
+                return "[run_python] no file saved: stdout is not valid JSON"
+
+        data = output.encode()
+        result = await self.t.write_file(path, data)
+        if not result.get("ok"):
+            return f"[run_python] write failed: {result.get('error', 'unknown error')}"
+        self._since_guard = min(self._since_guard, 0)
+        sample = output[:512]
+        if len(output) > len(sample):
+            sample += "\n[stdout sample truncated]"
+        return f"[run_python] saved {len(data)} bytes to {path}\n{sample}"
+
     async def _do(self, call):
         name = call["name"]
         a = call.get("arguments") or {}
         if name in {"exec", "run_python"}:
+            output_path = None
             if name == "run_python":
                 source = a.get("code")
                 if not isinstance(source, str) or not source.strip():
@@ -156,13 +198,22 @@ class Harness:
                 timeout = a.get("timeout_sec", PYTHON_TIMEOUT_DEFAULT)
                 if type(timeout) is not int or not 1 <= timeout <= PYTHON_TIMEOUT_MAX:
                     return f"[run_python] timeout_sec must be an integer from 1 to {PYTHON_TIMEOUT_MAX}"
+                if "output_path" in a:
+                    output_path = a["output_path"]
+                    if not isinstance(output_path, str) or not output_path.strip() or "\x00" in output_path:
+                        return "[run_python] output_path must be a nonempty file path without NUL bytes"
                 # Encode model source as data, including shell metacharacters and newlines.
                 encoded = base64.b64encode(source.encode()).decode("ascii")
                 program = f"import base64; exec(compile(base64.b64decode('{encoded}'), '<run_python>', 'exec'))"
+                if output_path is not None:
+                    # The exec relay combines stdout and stderr. Keep diagnostics out of this file.
+                    program = "import os; fd = os.open(os.devnull, os.O_WRONLY); os.dup2(fd, 2); os.close(fd); " + program
                 command = f"{quote_path(self.t.python_cmd)} -c {quote_path(program)}"
             else:
                 command, timeout = a.get("command", ""), a.get("timeout_sec", 120)
             r = await self.t.exec(command, timeout)
+            if output_path is not None:
+                return await self._save_python_output(output_path, r)
             body = (r.get("output") or "")[:14000]
             tag = "" if r.get("ok") else f"[exit {r.get('exit_code')}] "
             return f"{tag}{body}"
@@ -240,9 +291,19 @@ class Harness:
                f"conf={self.spec.get('confidence')} | skill={self.route['domain']}"
                f"/{self.route['family']}")
 
-        messages = [{"role": "user",
-                     "content": "Task instruction:\n\n" + self.instruction
-                                + "\n\nBegin. First read the inputs you need, then build."}]
+        prompt = "Task instruction:\n\n" + self.instruction
+        if self._single_data_file():
+            paths = list(dict.fromkeys(NAMED_TEXT_INPUT.findall(self.instruction)))
+            for path in paths[:2]:
+                data = await self.t.read_file(path)
+                if data and len(data) <= 4096:
+                    try:
+                        body = data.decode("utf-8-sig")
+                    except UnicodeDecodeError:
+                        continue
+                    prompt += f"\n\nInput already obtained with read_file from {path}:\n{body}"
+        prompt += "\n\nBegin. Use the input already supplied and fetch any remaining inputs you need."
+        messages = [{"role": "user", "content": prompt}]
 
         asked = 0
         while self.steps < MAX_STEPS:

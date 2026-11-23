@@ -29,12 +29,17 @@ TOOLS = [
     {"name": "run_python",
      "description": "Run Python source in the task container, starting in the workdir. "
                     "Pass Python source directly and print the quantities needed for the next step. "
+                    "To save a text deliverable, print only its complete contents and set output_path. "
+                    "The file is saved only when execution succeeds and output is complete. "
                     "Only filesystem state persists between calls.",
      "parameters": {"type": "object",
                     "properties": {"code": {"type": "string", "minLength": 1,
                                             "maxLength": PYTHON_SOURCE_MAX},
                                    "timeout_sec": {"type": "integer", "default": PYTHON_TIMEOUT_DEFAULT,
-                                                   "minimum": 1, "maximum": PYTHON_TIMEOUT_MAX}},
+                                                   "minimum": 1, "maximum": PYTHON_TIMEOUT_MAX},
+                                   "output_path": {"type": "string", "minLength": 1,
+                                                   "description": "Optional exact text deliverable path. "
+                                                                  "For .json, print one valid JSON value."}},
                     "required": ["code"]}},
     {"name": "read_file",
      "description": "Read a file from the task container. Returns utf-8 text when the bytes "
