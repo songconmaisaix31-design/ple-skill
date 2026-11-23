@@ -14,15 +14,35 @@
 | 项 | 现状 |
 |---|---|
 | 代码 | ✅ 可编译、离线闭环自测通过、协议往返冒烟通过、已推送 GitHub |
-| `kit check` | ❌ **从未跑过**（需要一台能跑 Docker daemon 的 Linux 主机 + 模型代理，云端亦可，见 §11） |
-| 真模型端到端 | ❌ **从未跑过**（Anthropic 原生路径只做过编译级验证） |
+| `kit check` | `submission.yaml` 通过，模型设置缺少 `MODEL_PROXY_URL` 和 `MODEL_PROXY_KEY`。独立执行 `kit build` 确认可执行环境没有 Docker |
+| 真模型端到端 | 原生 Claude、会话取消和多工具回复通过本地协议模拟。官方 task 容器和真实模型待跑 |
 | `artifacts/` | ❌ **目录不存在**，必须由 `eval/run.py` 生成，禁止手写 |
-| dev 分数 | **0**（不是分数低，是没有产物） |
+| dev 分数 | **未测**，暂无官方 `results.json` 或 `artifacts/` |
 | F-01 合规 | ✅ **已清理**：运行时指纹、baseline 反推数据已处置，静态自检 8/8（`docs/02-合规说明.md`） |
-| 距截止 | 2027-01-05 23:59:59，约 43 天 |
+| 截止 | 2027-01-06 07:59:59（北京时间），以 Kaggle Timeline 为准 |
 | 当前最该做 | 选一台**能跑 Docker 的云主机** → 跑 `cloud-preflight.sh` → 起云端模型代理 → `kit check` 打掉判 0 门槛 → 再上 dev set（§11） |
 
-一句话：**设计完成度约 90%，F-01 静态合规已完成，工程验证完成度约 30%，提交完成度 0%。不要现在提交。**
+先取得一次计分的公开题试跑，再固定 harness 版本跑全量。离线验证和官方配置校验只证明接入正确性的一部分。
+
+## 初赛评分证据
+
+| 评分项 | 分值 | 从评测保留的证据 |
+|---|---:|---|
+| 洞察与失败分析 | 25 | 真实失败轨迹和受控消融。同一模型、同一题、同一 judge 下单独开关一个机制 |
+| 工程推理 | 25 | 选一道公开题，比较有执照工程师与 harness 的流程、依据、验算和缺漏 |
+| 跨模型泛化 | 15 | 同一 harness 在两种模型上各跑 29 题，记录逐题成绩和 token |
+| 效率与扩展性 | 20 | 记录调用、token、耗时、并发规模和得分，标出增加预算后收益趋缓的位置 |
+| 表达与图表 | 15 | Writeup 少于 2,000 词，准备架构图、分数对成本图、失败分布图和独立封面 |
+
+开发顺序为 WSL 单题试跑、主模型 29 题基线、同版本第二模型 29 题，再从真实故障中选择一个改动做消融。比较时固定官方任务数据版本和 judge，记录仓库 commit。第二模型在独立工作树配置，并用官方 `--no-export` 保留对照结果，避免覆盖参赛产物。
+
+从 WSL 的正式题运行目录取得 `results.json` 后，可比较分数、覆盖、失败类型、token 和耗时。试跑只报告选中题的分数，配对分差只统计两边都已评分的任务。
+
+```bash
+python3 devtools/scorecard.py baseline=/path/to/results.json candidate=/path/to/results.json --details
+```
+
+评分与交付以 [Kaggle Evaluation](https://www.kaggle.com/competitions/physical-engineerings-last-exam/overview#evaluation) 为准。当前参赛分支按 [Google 官方 kit 公平竞赛规则](https://github.com/google-research/ple/blob/main/docs/rules.md) 使用与申报一致的模型生成提交产物。
 
 ---
 
@@ -32,9 +52,9 @@
 |---|---|---|
 | 比赛 | Physical-Engineering's Last Exam (PLE-Bench)，`ple-bench.com` / `github.com/google-research/ple` | 官网 |
 | Kaggle 入口 | `physical-engineerings-last-exam`；账号 **ktdkydylc 已报名**（`userHasEntered=True`） | Kaggle CLI 实测 |
-| 周期 / 奖金 | 2026-11-09 → **2027-01-05 23:59:59** / 400K USD（250K / 100K / 50K） | 官网 |
+| 周期 / 奖金 | 北京时间截止 **2027-01-06 07:59:59** / 400K USD（250K / 100K / 50K） | Kaggle |
 | 题量 | 85 题 = 29 dev（公开）+ 56 hidden；dev 数据集 955 MB（12 checks / 14 rubric / 3 checks-judge） | 官网 / HF |
-| 提交形态 | **一个 GitHub commit**：`submission.yaml` + harness + **同一 commit** 的 `artifacts/`；构建时匿名 clone 该仓库 | `docs/rules.md`、`kit/README.md` |
+| 提交形态 | 在 Kaggle 提交 GitHub commit，包含 `submission.yaml`、harness 和同一 commit 的 `artifacts/`，另交 Writeup | Kaggle、`docs/rules.md`、`kit/README.md` |
 | 模型 | `submission.yaml` = `google-cloud/claude-opus-5-5`（8 个赞助模型之一）；**模型始终在云端**，本地只需一个 LiteLLM 转发进程，经 `MODEL_PROXY_URL` + `MODEL_PROXY_KEY` 访问 | `docs/models.md` |
 | 自有云端 key | 官方明确允许「任意 LiteLLM / OpenAI-compatible 代理 serve 同名模型」，甚至举例「把 `claude-opus-5-5` 路由到自己的 Anthropic key」；**`model_api` 不改** | `docs/models.md` §Running google-cloud models on your machine |
 | 不能改的 | `anthropic/<model>` / `openai/<model>` / `gemini/<model>` / `openai-compatible/<model>` 都是 **local runs only**，`kit check` 永不报 `ready to submit` | `docs/models.md`、`kit/README.md` |
@@ -102,9 +122,9 @@ git status → 干净；无 API key / private key 泄漏（git grep 已扫）
 
 | 缺口 | 影响 | 归属 |
 |---|---|---|
-| `artifacts/` 不存在 | `kit check` 的 artifacts 阶段、`ready to submit`、dev 分数全部为 0 | M2 |
-| `kit check` 未跑 | build / listen / smoke / cancel 任一失败即**终止该次机会**，且会烧掉 3 次之一 | M1 |
-| 真模型端到端未验证 | `skillkit/model.py` 的 Anthropic 原生 `tool_use` / `tool_result` 序列化、`cache_control` 只做编译级验证 | T-03 |
+| `artifacts/` 不存在 | 尚无提交用产物和可报告的 dev 分数 | M2 |
+| `kit check` 首次停在模型设置 | 仍需在带 Docker 与模型代理的主机执行 build / listen / smoke / cancel | M1 |
+| 真模型端到端未验证 | Anthropic 原生 `tool_use` / `tool_result` 序列化、思考内容回传与用量统计已通过本地协议模拟 | T-03 |
 | dev set 29 题未跑 | 无分数、无 `manifest.json`、无法 readiness | M2 |
 | F-01 静态合规 | ✅ **已完成**：`f01_check.py` 8/8、GATE-A 6/6。剩余为**提交前人工项**：复核运行日志、把仓库重建为单个 commit 清除历史里的 reference 数据（`docs/02-合规说明.md` §6） | P0 |
 | git 历史残留 | 早期提交 `17408a5` / `a58b197` 曾含 baseline 反推数据；当前 HEAD 已删除，但历史 tree 仍在。官方要求「单个 commit」→ 最终应重建历史 | P1，提交前 |
@@ -125,7 +145,7 @@ git status → 干净；无 API key / private key 泄漏（git grep 已扫）
 | P0-4 | 起**云端模型代理**：A 档 Vertex AI（GCP + ADC）或 B 档自有云端 key 经 LiteLLM（§11.2 二选一） | `/health/liveliness` 200，且 `POST /v1/messages` 对 `claude-opus-5-5` 返回 200 |
 | P0-5 | ✅ **F-01 清理已完成（本轮）**：5 个 SKILL.md 去 `covers:` 与题面指纹；移出 `PLE_domain_skeleton.md` / `skeleton2.json` / `_build/`；`router.path_hint()` `+9 → +4`；`criteria.py` 外部化数据源；新增 G-12 与 `f01_check.py`；writeups 中性化 | 已达成：`python devtools/f01_check.py --dev-set <official dev_set.yaml>` → **PASS 8/8**，`criteria.py` **GATE-A 6/6**。详见 `docs/02-合规说明.md` |
 | P0-6 | `kit check`（先跳过 smoke 打掉门槛，再跑全量） | 全量检查末行出现 **`ready to submit`** |
-| P0-7 | 真模型跑 1~2 题，验 Anthropic 路径并校准「第 10~20 步落第一版」 | `runs/<run>/attempt1/harbor.log` 无 400/序列化异常，`results.json` 有分 |
+| P0-7 | WSL 先串行跑一题，验 Anthropic 路径和官方评分链路 | `runs/<run>/attempt1/harbor.log` 无 400/序列化异常，`results.json` 有实测结果 |
 
 ### P1 — dev set 与产物
 
@@ -154,7 +174,7 @@ git status → 干净；无 API key / private key 泄漏（git grep 已扫）
 | 1 | **HuggingFace 登录与条款同意**（唯一绕不开的人工项） | 数据集 `google/physical-engineerings-last-exam` 是 gated，条款与「Agree and access」只对登录账号可见，同意时会把用户名/邮箱共享给 Google，必须本人操作；之后建 **Read** token。本机 CLI 侧 `huggingface.co` 经代理 502 / 直连超时，**换云主机后大概率自动解除**；仍不通则预先下载任务目录用 `--tasks-dir` |
 | 2 | **云端模型凭据，二选一** | A：GCP 项目 + Vertex AI + 结算 + `gcloud auth application-default login`；**或** B：任意一个云端模型 API key，经 LiteLLM 代理 serve `claude-opus-5-5`（官方明文允许，§11.2）。**不需要本地模型、不需要 GPU** |
 | 3 | **云主机 / Docker** | 必须有一台能真正跑 Docker daemon 的 Linux 主机（≥16.25 GiB RAM）。纯沙箱 Coding Agent 通常不满足，见 §11.3 选型表。本机 `wsl.exe` 黑名单与 8.3 GiB 内存问题**因此可以整体绕开**，不再是阻塞 |
-| 4 | **提交动作** | 3 次机会是总量、同一时间只能有一次在队列；最终提交由本人在比赛站点操作（具体方式官方尚未公布） |
+| 4 | **提交动作** | 在 Kaggle 交经 kit 验证的提交 commit 和 Writeup，具体步骤以当期竞赛页面为准 |
 
 > 原「解除 `wsl.exe` 黑名单」「本机 Docker 调到 16 GiB」「必须装 gcloud」三项已从阻塞清单移除：改用云主机后它们都不再必要。
 
@@ -177,19 +197,23 @@ git status → 干净；无 API key / private key 泄漏（git grep 已扫）
 
 ## 7. 运行手册（任意 Linux + Docker：WSL2 或云主机）
 
-> 脚本名沿用 `wsl-run.sh`，但已泛化为不依赖 WSL / 不依赖 `/mnt/c`。**纯云端方案见 §11**（模型代理二选一、环境选型、三条红线），本节是通用命令层。
+WSL 先在 Linux 文件系统里运行 `check` 和 `pilot`。默认 `pilot` 只跑公开题 `wind-diaphragm-shear`，用程序化 grader、无需 LLM judge，且最多同时跑 1 题。它仍需要 Docker 和声明模型的代理。已有约 8.3 GiB Docker 内存可尝试单题，具体任务消耗以实跑为准。全量 29 题按官方指南给 Docker 至少 6 CPU 与 16.25 GiB 内存。
 
 ```bash
-# 在 Linux 文件系统里（云主机 ~/ 或 WSL2 ~/，不要 /mnt/c）
+# 在 WSL 的 Linux 文件系统里进入要评测的仓库
+export PLE_ENTRY_DIR="$PWD"
 bash devtools/cloud-preflight.sh                 # 先探测环境，缺什么一目了然
 S=devtools/wsl-run.sh
 bash $S env       # 生成 ~/ple-work/local.env（chmod 600，含随机 MODEL_PROXY_KEY）
                   #   填 HF_TOKEN；A 档再填 VERTEXAI_PROJECT，B 档再填 ANTHROPIC_API_KEY
 bash $S gcp       # 仅 A 档需要：gcloud ADC 登录（浏览器交互，本人操作）
-bash $S hf        # 校验 HF gated 授权（HTTP 200）
+bash $S hf        # 用已配置的 read token 校验 HF gated 授权（HTTP 200）
 bash $S check     # uv sync + harbor + model_proxy + kit check --no-smoke --cancel-test
-bash $S dev       # 先 1~2 题验真模型，再全量 29 题，产出 artifacts/
-bash $S ready     # kit artifacts + 全量 kit check（末行 ready to submit）
+bash $S smoke     # 官方文件与 MCP 冒烟，含 cancel
+bash $S pilot     # 默认跑 1 道 checks 题，结果留在官方 kit 的 runs/ 下
+bash $S dev       # 全量 29 题，产出 artifacts/
+# 复核后将 artifacts/ 与 harness 提交到同一 Git commit
+bash $S ready     # kit artifacts + 重判 + 全量 kit check（末行 ready to submit）
 ```
 
 等价的手动命令（出错时逐条排）：
@@ -202,9 +226,9 @@ MODEL_PROXY_HOST=0.0.0.0 MODEL_PROXY_PORT=4000 \
 VERTEXAI_PROJECT=<id> MODEL_PROXY_KEY=<key> kit/model_proxy/start.sh &
 # B 档：自有云端 key，改用 litellm + devtools/litellm-selfhosted.yaml.example（§11.2）
 uv run python -m kit check ~/ple-work/ple-skill --env-file ~/ple-work/local.env --no-smoke --cancel-test
-uv run python -m kit check ~/ple-work/ple-skill --env-file ~/ple-work/local.env
+uv run python -m kit check ~/ple-work/ple-skill --env-file ~/ple-work/local.env --cancel-test
 uv run python eval/run.py ~/ple-work/ple-skill --env-file ~/ple-work/local.env \
-    --tasks data-center-site-model,engineers-estimate-check --trials 1
+    --tasks wind-diaphragm-shear --trials 1 --attempts 1 --no-export
 uv run python eval/run.py ~/ple-work/ple-skill --env-file ~/ple-work/local.env
 uv run python -m kit artifacts ~/ple-work/ple-skill
 uv run python eval/run.py --artifacts ~/ple-work/ple-skill --env-file ~/ple-work/local.env
@@ -265,7 +289,7 @@ python devtools/f01_check.py --dev-set <官方 eval/dev_set.yaml>   # 8/8，含 
 - **模型通道选 A 还是 B？**（§11.2）A 需 GCP 项目 + 结算但零争议；B 只需一个云端 API key，但产物通道存在评审疑义。
 - **云端 Coding Agent 具体是哪种环境？** 关键只看一件事：**能否跑 Docker daemon**（§11.3 选型表）。若无 Docker，只能让它改代码，eval 要交给另一台机器。
 - 最终提交仓库是否就直接用本仓库？官方要求「匿名可克隆的单个 commit」，本仓库为 public，符合。`docs/` / `devtools/` 是工程笔记，已在 `docs/02-合规说明.md` 声明**不参与 runtime**；但**早期 git 提交里曾含 baseline 反推数据，当前 HEAD 已删除、历史 tree 仍在** —— 稳妥做法是从清理后的 tree 重建为单个全新 commit（或 squash 后 force push），否则仍建议精简/重建。
-- 比赛站点的**具体提交方式官方尚未公布**，需持续关注 `ple-bench.com`。
+- 比赛提交与时间线以 Kaggle 当期页面为准。
 - `ple-template`（原 Linux 环境的 29 题题面 + baseline artifacts）**不在本次解压包里**；README 的 25/29、23/29、17 PASS/2 WARN/5 FAIL 因此在本机无法复现。本轮已把 `criteria.py --template` 默认值改为**空**、并新增 `--truth`（也可用 `PLE_TEMPLATE` / `PLE_TRUTH` 环境变量），仓库内不再内置任何 reference 路径；有数据时显式传外部路径。
 - 若 HF 网络始终不通，退路是预先下载任务目录后用 `eval/run.py --tasks-dir DIR`。
 - 环境就绪后**优先跑 `check` 而不是 `dev`**；顺序反了会在没验证 build 的情况下白烧几小时机时。

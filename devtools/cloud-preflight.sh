@@ -4,10 +4,9 @@
 #
 #   bash devtools/cloud-preflight.sh
 #
-# Mandatory (FAIL => eval/run.py cannot run):
-#   Linux/amd64, Docker daemon usable, >=16.25 GiB RAM, >=6 CPUs, >=10 GiB free disk,
-#   git/curl/openssl/python3/uv, outbound access to huggingface.co + github.com + pypi.org.
-# Optional (WARN): HF_TOKEN gated access, model endpoint, long-running session.
+# The official runner needs a working Docker daemon and toolchain. Resource
+# checks report capacity for the largest full dev task and its serve stack.
+# HF and package endpoints can be unavailable when using previously cached files.
 set -uo pipefail
 
 PASS=0; WARN=0; FAIL=0
@@ -44,11 +43,11 @@ else
     mem=$(docker info --format '{{.MemTotal}}' 2>/dev/null || echo 0)
     cpu=$(docker info --format '{{.NCPU}}' 2>/dev/null || echo 0)
     if [[ "$mem" =~ ^[0-9]+$ ]] && (( mem > 0 )); then
-      gib=$((mem / 1024 / 1024 / 1024))
-      if (( mem >= 16 * 1024 * 1024 * 1024 )); then
-        ok "Docker 内存 ${gib} GiB（官方要求 >=16.25 GiB）"
+      gib=$(awk -v bytes="$mem" 'BEGIN {printf "%.2f", bytes / 1073741824}')
+      if (( mem >= 16640 * 1024 * 1024 )); then
+        ok "Docker 内存 ${gib} GiB（覆盖官方全量 dev set 最大预留）"
       else
-        fail "Docker 内存仅 ${gib} GiB < 16.25 GiB，全量 dev set 会 OOM；加大机型或 Docker Desktop Resources"
+        warn "Docker 内存 ${gib} GiB；全量 dev set 最大任务及其辅助容器建议至少 16.25 GiB"
       fi
     else
       warn "读不到 Docker MemTotal，请手工确认 >=16.25 GiB"
@@ -75,10 +74,12 @@ hostgib=$((hostmem_kb / 1024 / 1024))
 echo "  host CPU=$hostcpu, host RAM=${hostgib} GiB"
 [[ "$hostcpu" -ge 6 ]] && ok "宿主 CPU >= 6" || warn "宿主 CPU < 6"
 [[ "$hostgib" -ge 16 ]] && ok "宿主 RAM >= 16 GiB" || warn "宿主 RAM < 16 GiB（容器内存才是关键，见上）"
-freegib=$(df -PB1 / 2>/dev/null | awk 'NR==2 {print int($4/1024/1024/1024)}')
+work_path="${PLE_ROOT:-$HOME/ple-work}"
+while [[ ! -d "$work_path" ]]; do work_path=$(dirname -- "$work_path"); done
+freegib=$(df -PB1 -- "$work_path" 2>/dev/null | awk 'NR==2 {print int($4/1024/1024/1024)}')
 if [[ -n "$freegib" ]]; then
-  echo "  / 可用磁盘 ${freegib} GiB（基础镜像约 17 GB + 任务产物）"
-  [[ "$freegib" -ge 30 ]] && ok "磁盘空间充足" || warn "磁盘偏紧，建议 >=30 GiB 空闲"
+  echo "  评分工作目录所在磁盘可用 ${freegib} GiB（$work_path）"
+  [[ "$freegib" -ge 30 ]] && ok "工作目录磁盘空间充足" || warn "工作目录磁盘偏紧，请同时检查 Docker 镜像所在卷空间"
 fi
 
 sec "3. 工具链"
@@ -99,10 +100,10 @@ fi
 sec "4. 出站网络（本机需要，评测容器不需要）"
 probe() {
   local name="$1" url="$2" code
-  code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$url" 2>/dev/null || echo 000)
+  code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$url" 2>/dev/null) || code=000
   case "$code" in
     200|301|302|401|403) ok "$name 可达（HTTP $code）" ;;
-    000)                  fail "$name 不可达（超时/被墙）。dev set 需要它：考虑 --tasks-dir 预下载或换机型/区域" ;;
+    000)                  warn "$name 暂不可达，请检查网络或已缓存的依赖与数据" ;;
     *)                    warn "$name 返回 HTTP $code，需人工确认" ;;
   esac
 }
@@ -111,20 +112,22 @@ probe "github.com（匿名 clone 仓库）"     "https://github.com"
 probe "pypi.org（uv 装依赖）"             "https://pypi.org/simple/"
 
 sec "5. 凭据（只看是否设置，不打印值）"
-if [[ -n "${HF_TOKEN:-}" ]]; then
-  ok "HF_TOKEN 已设置"
-  code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
-        -H "Authorization: Bearer $HF_TOKEN" \
-        "https://huggingface.co/api/datasets/google/physical-engineerings-last-exam" 2>/dev/null || echo 000)
+hf_token="${HF_TOKEN:-${HUGGING_FACE_HUB_TOKEN:-}}"
+if [[ -n "$hf_token" && "$hf_token" != REPLACE_WITH_* ]]; then
+  ok "Hugging Face token 已设置"
+  code=$(printf 'Authorization: Bearer %s\n' "$hf_token" | curl \
+        -sS -o /dev/null -w '%{http_code}' --max-time 20 -H @- \
+        "https://huggingface.co/api/datasets/google/physical-engineerings-last-exam/auth-check" 2>/dev/null) || code=000
   [[ "$code" == "200" ]] && ok "HF gated 授权已生效（HTTP 200）" || warn "HF gated 授权未确认（HTTP $code）；需先在数据页 Agree and access"
 else
-  warn "HF_TOKEN 未设置；放到 ~/ple-work/local.env，绝不入库"
+  warn "未在当前环境检测到 Hugging Face token；也可使用 CLI 登录缓存或已下载的任务目录"
 fi
 for k in VERTEXAI_PROJECT ANTHROPIC_API_KEY OPENAI_API_KEY MODEL_PROXY_URL MODEL_PROXY_KEY; do
   if [[ -n "${!k:-}" ]]; then echo "  $k = <set>"; else echo "  $k = <unset>"; fi
 done
-if [[ -z "${VERTEXAI_PROJECT:-}" && -z "${ANTHROPIC_API_KEY:-}" && -z "${OPENAI_API_KEY:-}" ]]; then
-  warn "没有任何模型凭据：A 档填 VERTEXAI_PROJECT，或 B 档填 ANTHROPIC_API_KEY（见 HANDOFF.md §11.2）"
+if [[ -z "${VERTEXAI_PROJECT:-}" && -z "${ANTHROPIC_API_KEY:-}" && -z "${OPENAI_API_KEY:-}" \
+      && ( -z "${MODEL_PROXY_URL:-}" || -z "${MODEL_PROXY_KEY:-}" ) ]]; then
+  warn "当前环境未检测到模型代理或凭据（也可在评分主机的 local.env 配置）"
 fi
 
 sec "6. Git 仓库卫生"

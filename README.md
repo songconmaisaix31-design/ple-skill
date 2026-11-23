@@ -1,8 +1,8 @@
-# PLE harness — v1（设计完成，dev set 尚未跑）
+# PLE harness
 
 Physical-Engineering's Last Exam 参赛 harness。**spec-first + 交付物守卫**的第一版实现。
 
-> **当前状态（2026-11-23）**：代码已修复并通过离线自测与协议往返冒烟；**F-01 静态合规清理已完成**（`devtools/f01_check.py` 8/8、`criteria.py` GATE-A 6/6）。但 **`kit check` 未跑、真模型端到端未验证、`artifacts/` 不存在、dev 分数为 0**。
+> **评测状态（2026-11-23）**：官方 `kit validate` 通过，`kit check` 通过配置解析后停在缺少模型代理配置，独立构建检查确认当前环境没有 Docker。离线闭环、原生 Claude 协议冒烟和 F-01 静态检查已通过。尚未运行公开 dev set，暂无官方 dev 分数或参赛 `artifacts/`。
 > 本文的「三项指标」是**对 baseline artifacts 的离线静态回归**，不是本 harness 跑过 29 题。
 > 剩余任务、阻塞项、运行手册与合规红线见 **[HANDOFF.md](HANDOFF.md)**；评估原件见 `docs/00-接手评估.md`，修复记录见 `docs/01-修复与验证记录.md`，**F-01 处置说明见 `docs/02-合规说明.md`**。
 
@@ -72,7 +72,7 @@ python3 dryrun.py
 # 2) 用真实题面 + 真实 workdir，仍然用 stub 模型
 python3 dryrun.py --artifact /path/to/artifacts/<task> --instruction inst.txt
 
-# 3) 不需要模型 / Docker 的协议往返冒烟（task -> exec/write_file -> done）
+# 3) 本地模拟原生 Claude API，验证模型请求、WebSocket 与交付闭环
 python3 devtools/protocol_smoke.py
 
 # 4) 可执行验收判据（缺 29 题数据时应报 BLOCKED，而不是 PASS）
@@ -86,9 +86,12 @@ PORT=8080 python3 serve.py
 官方链路（需要 Docker + uv + harbor）：
 
 ```bash
-uv run python -m kit check /path/to/this/repo --cancel-test
-uv run python eval/run.py /path/to/this/repo     # 写 artifacts/，必须与代码同一 commit
-uv run python -m kit artifacts /path/to/this/repo
+export PLE_ENTRY_DIR="$PWD"      # 评测当前 WSL/Linux 仓库
+bash devtools/wsl-run.sh check    # 快速检查，含 cancel
+bash devtools/wsl-run.sh pilot    # 默认单题，结果留在官方 kit 的 runs/ 下
+bash devtools/wsl-run.sh dev      # 全量 29 题，生成参赛 artifacts/
+# 复核后将 artifacts/ 与 harness 提交到同一 Git commit
+bash devtools/wsl-run.sh ready    # 校验产物、重判、完整 kit check
 ```
 
 ## 已知缺口（v1 边界）
@@ -98,8 +101,7 @@ uv run python -m kit artifacts /path/to/this/repo
    workdir 根目录就失效）。
 2. **守卫是结构性的**：只查路径、可解析性、列头、必需件，不判断工程内容对不对。
 3. **CSV 列头硬判**：若题面列头与 grader 实际接受的有偏差，会误判（已由 3 次熔断兜底）。
-4. **未跑过真模型**：本地无 Docker、无 API key，`serve.py` 的真实端到端尚未验证；
-   协议帧格式、cancel、usage 上报按 `AGENTS.md` §7 逐条实现，但需要一次真跑才算数。
+4. **未跑过真模型**：本地模拟已覆盖原生 Claude 工具调用、取消和用量上报。官方 Docker 环境和真实模型仍待验证。
 5. **模型选择**：`submission.yaml` 现填 `google-cloud/claude-opus-5-5`。Claude 走
    Anthropic 原生路径并显式打 `cache_control`（system + 最新消息），因为 dev 轨迹里
    96% 的 prompt token 是 cached——不打就是每轮全价重付。

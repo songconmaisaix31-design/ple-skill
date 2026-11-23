@@ -5,7 +5,7 @@ Shape: spec first (the acceptance contract is written before the model sees
 anything), skill routed second, one minimal complete deliverable early, then
 guard-driven iteration until the guard passes or time runs out.
 """
-import json, os, time
+import asyncio
 
 from . import specgen, router
 from .guard import Guard
@@ -21,8 +21,9 @@ The grader reads only file paths, names, formats and contents; a rubric judge al
 final_message. Nothing else you say counts.
 
 Non-negotiables:
-- The acceptance contract below is the highest authority. Exact filenames, exact column
-  headers, exact member files. A perfect memo at the wrong path scores zero.
+- Follow the task's explicit deliverable requirements. Use the inferred contract below as
+  a checklist and verify its exact paths, filenames, column headers and required contents
+  against the task instructions and relevant input documents.
 - Work inside the task container with exec/read_file/write_file/mcp_call. python3 is present
   with python-docx, openpyxl, pandas, libreoffice and pdftotext.
 - Read the task inputs before writing. Reconcile conflicting documents explicitly and say
@@ -32,6 +33,7 @@ Non-negotiables:
   nothing on disk.
 - Every number you assert must come from a document you actually read or a calculation you
   actually ran. Never invent a clause number, a section reference or a test result.
+- Check all hard constraints before optimizing a design, and recheck them after changing it.
 - Do not hard-code answers or branch on a task's identity. Solve the task in front of you.
 
 Tool notes:
@@ -77,11 +79,12 @@ class Harness:
         self.final = ""
         self.steps = 0
         self._since_guard = 99
-        self._guard_fails = 0
+        self._periodic_alerts = 0
+        self._finish_refusals = 0
         self._ctx = router.load_context(self.route["domain"])
 
     # ---------- prompt ----------
-    def _system(self, snapshot, wrap=False):
+    def _system(self, snapshot):
         parts = [SYSTEM_BASE]
         parts.append("\n=== ACCEPTANCE CONTRACT (auto-parsed from the instruction) ===\n"
                      + _fmt_contract(self.spec))
@@ -91,11 +94,12 @@ class Harness:
         if self.mcp:
             urls = "\n".join(f"  {s.get('name')}: {s.get('url')} ({s.get('transport')})"
                              for s in self.mcp)
-            parts.append("\n=== MCP SERVERS (reachable only through mcp_call) ===\n" + urls)
-        if wrap:
-            parts.append("\n=== WRAP-UP MODE ===\nThe budget is nearly gone. Stop exploring. "
-                         "Make sure the deliverable at the contract path is complete, valid and "
-                         "readable, then call finish with a summary.")
+            parts.append("\n=== MCP SERVERS (reachable only through mcp_call) ===\n" + urls
+                         + "\nFor Streamable HTTP, POST JSON-RPC initialize first. Send "
+                         "notifications/initialized before tools/list or tools/call. Include "
+                         "the returned Mcp-Session-Id header (if present) and set the "
+                         "MCP-Protocol-Version header to the initialize result's protocolVersion "
+                         "on subsequent requests. For SSE, read the JSON-RPC reply on the data lines.")
         parts.append("\n=== WORKSPACE SNAPSHOT (taken by the harness before you started) ===\n"
                      + snapshot)
         return "\n".join(parts)
@@ -148,26 +152,56 @@ class Harness:
                 return "[write_file] failed: " + str(r.get("error"))
             return f"[write_file] ok {r.get('size', len(blob))} bytes -> {a.get('path')}"
         if name == "mcp_call":
-            hdrs = a.get("headers") or {"content-type": "application/json",
-                                        "accept": "application/json, text/event-stream"}
+            hdrs = {"content-type": "application/json",
+                    "accept": "application/json, text/event-stream"}
+            supplied_headers = a.get("headers") or {}
+            if not isinstance(supplied_headers, dict) or not all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in supplied_headers.items()
+            ):
+                return "[mcp_call] headers must be a mapping of strings to strings"
+            hdrs.update({key.lower(): value for key, value in supplied_headers.items()})
             r = await self.t.http(a.get("method", "POST"), a.get("url", ""), hdrs,
                                   (a.get("body") or "").encode())
-            body = (r.get("body_b64") or "")
+            if r.get("ok") is False and r.get("status") is None:
+                return f"[mcp_call] relay failed: {r.get('error') or 'no HTTP response'}"
+
             import base64 as _b
             try:
-                txt = _b.b64decode(body).decode("utf-8", "replace")
-            except Exception:
-                txt = str(body)
-            return f"[http {r.get('status')}] {txt[:8000]}"
+                txt = _b.b64decode(r.get("body_b64") or "", validate=True).decode("utf-8", "replace")
+            except (TypeError, ValueError):
+                txt = "[invalid HTTP response body encoding]"
+
+            result = [f"[http {r.get('status')}]"]
+            for key, value in (r.get("headers") or {}).items():
+                if key.lower() in {"content-type", "mcp-session-id", "mcp-protocol-version"}:
+                    result.append(f"{key}: {value}")
+            if txt:
+                result.append(txt[:8000])
+            if r.get("truncated") or len(txt) > 8000:
+                result.append("[HTTP response body truncated]")
+            return "\n".join(result)
         return f"[unknown tool] {name}"
 
     # ---------- loop ----------
     async def run(self, timeout_sec=21600, on_usage=None, on_log=None):
         on_log = on_log or self.log
-        start = time.time()
-        deadline = start + timeout_sec * HARD_BUDGET
+        clock = asyncio.get_running_loop().time
+        deadline = None if timeout_sec is None else clock() + timeout_sec * HARD_BUDGET
+        wrap_at = None if deadline is None else deadline - timeout_sec * (HARD_BUDGET - WRAP_BUDGET)
+        budget = asyncio.timeout_at(deadline)
+        try:
+            async with budget:
+                return await self._run(on_usage, on_log, wrap_at, clock)
+        except TimeoutError:
+            if not budget.expired():
+                raise
+            on_log("hard deadline hit")
+            return self.final or "The harness reached its time budget. Review the files already written."
 
+    async def _run(self, on_usage, on_log, wrap_at, clock):
         snapshot = await self._snapshot()
+        system = self._system(snapshot)
         on_log(f"spec: {self.spec.get('deliverable')} mode={self.spec.get('mode')} "
                f"conf={self.spec.get('confidence')} | skill={self.route['domain']}"
                f"/{self.route['family']}")
@@ -178,23 +212,26 @@ class Harness:
 
         asked = 0
         while self.steps < MAX_STEPS:
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                on_log("hard deadline hit")
-                break
-            wrap = remaining < timeout_sec * (1 - WRAP_BUDGET)
-            system = self._system(snapshot, wrap=wrap)
+            if wrap_at is not None and clock() >= wrap_at:
+                messages.append({"role": "user", "content":
+                                 "The budget is nearly gone. Check the deliverable is complete, "
+                                 "valid and readable, then call finish with a summary."})
+                wrap_at = None
             try:
                 resp = await self.model.chat(messages, system)
             except Exception as e:
+                if self.steps == 0:
+                    raise
                 on_log(f"model error: {e}")
                 break
             self.steps += 1
             if on_usage:
                 on_usage(resp["usage"])
             calls = resp.get("tool_calls") or []
-            messages.append({"role": "assistant", "content": resp.get("content", ""),
-                             "tool_calls": calls})
+            turn = {"role": "assistant", "content": resp.get("content", ""), "tool_calls": calls}
+            if "anthropic_content" in resp:
+                turn["anthropic_content"] = resp["anthropic_content"]
+            messages.append(turn)
 
             if not calls:
                 asked += 1
@@ -207,51 +244,61 @@ class Harness:
                                             "really is complete."})
                 continue
 
-            finish_req = None
+            asked = 0
+            finish_result = None
+            summary = ""
             for call in calls:
+                result = {"role": "tool", "tool_call_id": call["id"], "content": ""}
+                messages.append(result)
                 if call["name"] == "finish":
-                    finish_req = call
+                    arguments = call.get("arguments")
+                    final_message = arguments.get("final_message") if isinstance(arguments, dict) else None
+                    if finish_result is not None:
+                        result["content"] = "A finish request was already made this turn."
+                    elif isinstance(final_message, str):
+                        finish_result = result
+                        summary = final_message
+                    else:
+                        result["content"] = "finish requires a final_message string."
                     continue
-                obs = await self._do(call)
-                messages.append({"role": "tool", "tool_call_id": call["id"], "content": obs})
+                try:
+                    result["content"] = await self._do(call)
+                except (TypeError, ValueError, AttributeError) as e:
+                    result["content"] = f"Invalid arguments for {call['name']}: {e}"
 
             # guard: only when something was actually written since the last check
             if self._since_guard >= 0:
                 self._since_guard += 1
             else:
                 self._since_guard = 0
-            if self._since_guard == 2 and finish_req is None:
+            if self._since_guard == 2 and finish_result is None:
                 status, rep = await self.guard.run()
                 on_log(f"guard: {status}")
                 self._since_guard = 99
-                if status in ("FAIL", "ERROR") and self._guard_fails < 2:
-                    self._guard_fails += 1
+                if status in ("FAIL", "ERROR") and self._periodic_alerts < 2:
+                    self._periodic_alerts += 1
                     messages.append({"role": "user",
                                      "content": "GUARD FAILED for the contract path. Fix these "
                                                 "before anything else:\n" + rep})
 
-            if finish_req is not None:
+            if finish_result is not None:
                 status, rep = await self.guard.run()
                 on_log(f"guard at finish: {status}")
-                self.final = (finish_req.get("arguments") or {}).get("final_message", "")
                 if status in ("FAIL", "ERROR"):
-                    self._guard_fails += 1
-                    if self._guard_fails < 3:
-                        messages.append({"role": "tool", "tool_call_id": finish_req["id"],
-                                         "content": "REFUSED. The deliverable does not satisfy "
-                                                    "the contract yet:\n" + rep + "\nFix it, "
-                                                    "then finish again."})
-                        self.final = ""
+                    self._finish_refusals += 1
+                    if self._finish_refusals < 3:
+                        finish_result["content"] = ("REFUSED. The deliverable does not satisfy the contract yet:\n"
+                                                    + rep + "\nFix it, then finish again.")
                         self._since_guard = 99
                         continue
                     # three refusals: the contract itself may be wrong (the task may
                     # accept a different name than the parser inferred). Ship it with
                     # the discrepancy stated rather than spin out the clock.
                     on_log("guard refused three times; shipping with a stated discrepancy")
-                    self.final = ("CONTRACT DISCREPANCY - the parser-inferred path could not be "
-                                  "satisfied:\n" + rep[-900:] + "\n\n" + self.final)
+                    summary = ("CONTRACT DISCREPANCY - the parser-inferred path could not be "
+                               "satisfied:\n" + rep[-900:] + "\n\n" + summary)
+                self.final = summary
                 break
-            self._since_guard = 99 if self._since_guard == 99 else self._since_guard
 
         if not self.final:
             status, rep = await self.guard.run()
