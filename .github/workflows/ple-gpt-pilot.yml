@@ -60,7 +60,7 @@ jobs:
           "$test_env/bin/python" devtools/workbook_regression.py
           "$test_env/bin/python" devtools/code_action_regression.py
 
-      - name: Replay both frozen storage experiments from archived files
+      - name: Replay all frozen storage experiments from archived files
         shell: bash
         run: |
           unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
@@ -141,6 +141,46 @@ jobs:
               if json.loads((saved / name).read_bytes()) != json.loads((replay / name).read_bytes()):
                   raise SystemExit(f"controlled-repair-replay-v1/{name} differs from replay")
           PYCONTROLLED
+
+          constrained=docs/experiments/constrained-patch-v1
+          constrained_replay="$RUNNER_TEMP/constrained-patch-v1"
+          mkdir -p "$constrained_replay"
+          python3 devtools/build_constrained_patch_evidence.py \
+            --protocol "$constrained/protocol.json" \
+            --job j:1:"$constrained/attempts/run-45267026840-j1.zip" \
+            --job j:2:"$constrained/attempts/run-45267026840-j2.zip" \
+            --job j:3:"$constrained/attempts/run-45267026840-j3.zip" \
+            --job k:1:"$constrained/attempts/run-45267026840-k1.zip" \
+            --job k:2:"$constrained/attempts/run-45267026840-k2.zip" \
+            --job k:3:"$constrained/attempts/run-45267026840-k3.zip" \
+            --output "$constrained_replay/evidence.zip" \
+            --audit "$constrained_replay/attempts.json"
+          cmp "$constrained/evidence.zip" "$constrained_replay/evidence.zip"
+          python3 devtools/verify_constrained_patch_evidence.py \
+            --archive "$constrained_replay/evidence.zip" \
+            --protocol "$constrained/protocol.json" \
+            --settings-protocol docs/experiments/repair-source-v1/protocol.json \
+            --csv "$constrained_replay/trials.csv" \
+            --details "$constrained_replay/code-coverage.json"
+          python3 devtools/constrained_patch_report.py "$constrained_replay/trials.csv" \
+            --output "$constrained_replay/summary.json"
+          python3 - "$constrained" "$constrained_replay" <<'PYCONSTRAINED'
+          import csv
+          import json
+          import sys
+          from pathlib import Path
+
+          saved, replay = map(Path, sys.argv[1:])
+          with (saved / "trials.csv").open(newline="") as a, (replay / "trials.csv").open(newline="") as b:
+              archived, rebuilt = csv.DictReader(a), csv.DictReader(b)
+              if archived.fieldnames != rebuilt.fieldnames or list(archived) != list(rebuilt):
+                  raise SystemExit("constrained-patch-v1/trials.csv differs from replay")
+          for name in ("summary.json", "code-coverage.json"):
+              if json.loads((saved / name).read_bytes()) != json.loads((replay / name).read_bytes()):
+                  raise SystemExit(f"constrained-patch-v1/{name} differs from replay")
+          if json.loads((saved / "attempts/attempts.json").read_bytes()) != json.loads((replay / "attempts.json").read_bytes()):
+              raise SystemExit("constrained-patch-v1/attempts.json differs from replay")
+          PYCONSTRAINED
 
       - name: Exchange the authorized runner identity for a temporary Hugging Face token
         if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' }}

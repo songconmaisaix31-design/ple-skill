@@ -1,0 +1,135 @@
+{
+  "cases": [
+    "j",
+    "k"
+  ],
+  "seed": 17,
+  "release_sec": 250,
+  "snapshot_sec": 395,
+  "complete": true,
+  "counts_by_arm": {
+    "text-source": {
+      "planned": 6,
+      "measured": 6,
+      "repair_requests": 6,
+      "source_exposures": 6,
+      "timing_valid": 6,
+      "first_repair_responses_completed": 0,
+      "patch_interface_uses": 0,
+      "patch_attempts": 0,
+      "accepted_patches": 0,
+      "out_of_contract_tool_responses": 0,
+      "nonempty_text_responses": 0
+    },
+    "patch-source": {
+      "planned": 6,
+      "measured": 6,
+      "repair_requests": 6,
+      "source_exposures": 6,
+      "timing_valid": 6,
+      "first_repair_responses_completed": 6,
+      "patch_interface_uses": 6,
+      "patch_attempts": 24,
+      "accepted_patches": 0,
+      "out_of_contract_tool_responses": 24,
+      "nonempty_text_responses": 0
+    }
+  },
+  "paired_results_by_case": {
+    "j": {
+      "pairs": [
+        {
+          "repeat": 1,
+          "text-source": 0.0,
+          "patch-source": 0.0,
+          "patch_source_minus_text_source": 0.0
+        },
+        {
+          "repeat": 2,
+          "text-source": 0.0,
+          "patch-source": 0.0,
+          "patch_source_minus_text_source": 0.0
+        },
+        {
+          "repeat": 3,
+          "text-source": 0.0,
+          "patch-source": 0.0,
+          "patch_source_minus_text_source": 0.0
+        }
+      ],
+      "mean_paired_difference": 0.0,
+      "wins": 0,
+      "ties": 3,
+      "losses": 0
+    },
+    "k": {
+      "pairs": [
+        {
+          "repeat": 1,
+          "text-source": 0.0,
+          "patch-source": 0.0,
+          "patch_source_minus_text_source": 0.0
+        },
+        {
+          "repeat": 2,
+          "text-source": 0.0,
+          "patch-source": 0.0,
+          "patch_source_minus_text_source": 0.0
+        },
+        {
+          "repeat": 3,
+          "text-source": 0.0,
+          "patch-source": 0.0,
+          "patch_source_minus_text_source": 0.0
+        }
+      ],
+      "mean_paired_difference": 0.0,
+      "wins": 0,
+      "ties": 3,
+      "losses": 0
+    }
+  },
+  "case_macro_score_by_repeat": [
+    {
+      "repeat": 1,
+      "text-source": 0.0,
+      "patch-source": 0.0,
+      "patch_source_minus_text_source": 0.0
+    },
+    {
+      "repeat": 2,
+      "text-source": 0.0,
+      "patch-source": 0.0,
+      "patch_source_minus_text_source": 0.0
+    },
+    {
+      "repeat": 3,
+      "text-source": 0.0,
+      "patch-source": 0.0,
+      "patch_source_minus_text_source": 0.0
+    }
+  ],
+  "across_repeat_statistics": {
+    "text-source": {
+      "n": 3,
+      "mean": 0.0,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    },
+    "patch-source": {
+      "n": 3,
+      "mean": 0.0,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    },
+    "patch_source_minus_text_source": {
+      "n": 3,
+      "mean": 0.0,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    }
+  },
+  "registered_decision": "stop_candidate_no_gain",
+  "failure_diagnosis": "All six candidate first repair calls completed, but the model returned truncated run_python tool calls instead of the required JSON line replacement. The host guard accepted zero of 24 completed candidate responses.",
+  "interpretation": "This controlled diagnostic estimates recovery conditional on one fixed induced failure. It is separate from the official PLE development score."
+}
