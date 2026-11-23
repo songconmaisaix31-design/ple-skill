@@ -1,33 +1,65 @@
 #!/usr/bin/env python3
 """Auto-generate a deliverable spec from a PLE task instruction (+ task.md)."""
-import os, re, json
+import os, posixpath, re, json
 
-EXT_OK = (".zip", ".docx", ".xlsx", ".ifc", ".pdf", ".csv", ".md", ".py", ".dxf", ".txt", ".eml")
+EXT_OK = (".zip", ".docx", ".xlsx", ".ifc", ".pdf", ".csv", ".md", ".py", ".dxf",
+          ".txt", ".eml", ".json")
 # files that are inputs, never deliverables
-INPUT_HINT = ("task.md", "README", "project/", "criteria/", "owner/", "specs/", "drawings/",
+INPUT_HINT = ("task.md", "README", "input/", "inputs/", "project/", "criteria/", "owner/", "specs/", "drawings/",
               "schedules/", "site/", "vendor/", "procurement/")
+
+FILE_EXT = "(?:" + "|".join(re.escape(ext) for ext in EXT_OK) + ")"
+PATH_END = r"(?=$|[\s`\"',;:!?)\]]|\.(?=\s|$))"
+FILE_PATH = rf"(?:`[^`\n]+{FILE_EXT}`|\"[^\"\n]+{FILE_EXT}\"|[A-Za-z0-9_./-]+{FILE_EXT}{PATH_END})"
+OUTPUT_ACTION = (r"\b(?:save[ds]?|write[sn]?|written|deliver(?:ed|s)?|store[ds]?|put|place[ds]?|"
+                 r"publish(?:ed|es)?|creat(?:e|ed|es)|submit(?:ted|s)?|export(?:ed|s)?)\b")
+DESTINATION = r"(?:\s+(?:[\w-]+\s+){0,8}?(?:as|to|at|in(?:to)?|under|named|called))?\s+"
+EXPLICIT_FILE = re.compile(rf"{OUTPUT_ACTION}{DESTINATION}({FILE_PATH})", re.I)
+EXPLICIT_DIR = re.compile(rf'{OUTPUT_ACTION}{DESTINATION}[`"]?([A-Za-z0-9_./-]+/){PATH_END}', re.I)
+FILE_LIST_TAIL = re.compile(rf"(?:\s*[,]\s*(?:and\s+)?|\s+and\s+)({FILE_PATH})", re.I)
+NAMED_PATH = re.compile(rf"(?<![A-Za-z0-9_./-]){FILE_PATH}", re.I)
+
+
+def _is_input(path):
+    low = path.lower()
+    return any(hint.lower() in low for hint in INPUT_HINT)
+
+
+def _explicit_directory(text):
+    match = EXPLICIT_DIR.search(text)
+    if match and not _is_input(match[1]):
+        return match[1]
+    match = re.search(rf'\b(?:under|in|into|to)\s+[`"]?([A-Za-z0-9_./-]+/){PATH_END}', text, re.I)
+    if match and "output" in match[1].lower() and not _is_input(match[1]):
+        return match[1]
+    match = re.search(r"`(output[A-Za-z0-9_./-]*)`", text, re.I)
+    if match and (match[1].endswith("/") or match[1].lower() == "output"):
+        return match[1].rstrip("/") + "/"
+    return ""
 
 
 def extract_root(text):
     """Find the deliverable root or file path the prompt points at."""
-    # 0) "Save the files that make up your answer under `output/`" -> a directory
-    m = re.search(r"(?:under|in|into)\s+`([A-Za-z0-9_./-]+/)`", text)
-    if m and "output" in m.group(1).lower():
-        return m.group(1)
-    m = re.search(r"`(output/?[A-Za-z0-9_./-]*)`", text)
-    if m:
-        g = m.group(1)
-        if g.endswith("/") or g == "output":
-            return g if g.endswith("/") else "output/"
-
-    # 1) unquoted: "Save it as /filesystem/Foo_Bar.docx" / "Put it in a note saved as ..."
-    m = re.search(
-        r"(?:save|saved|write|written|deliver|delivered|store|stored|put|place|publish|published)"
-        r"\s+(?:[A-Za-z]+\s+){0,4}(?:as|to|at|in)\s+"
-        r"([/A-Za-z0-9_][A-Za-z0-9_./\-]{2,140}\.(?:zip|docx|xlsx|ifc|pdf|py|csv|md))",
-        text, re.I)
-    if m and ("/" in m.group(1) or "output" in m.group(1).lower()):
-        return m.group(1).strip()
+    directory = _explicit_directory(text)
+    explicit = []
+    for match in EXPLICIT_FILE.finditer(text):
+        while match:
+            if not _is_input(match[1]):
+                explicit.append(match[1].strip('`"').strip())
+            match = FILE_LIST_TAIL.match(text, match.end())
+    if explicit:
+        if directory:
+            prefix = posixpath.normpath(directory).rstrip("/") + "/"
+            named_outputs = {posixpath.normpath(path) for path in explicit}
+            for match in NAMED_PATH.finditer(text):
+                path = posixpath.normpath(match[0].strip('`"').strip())
+                if path.startswith(prefix) and not _is_input(path):
+                    named_outputs.add(path)
+            if len(named_outputs) > 1 or (count_claim(text) or 0) > 1:
+                return directory
+        return explicit[0]
+    if directory:
+        return directory
 
     cands = re.findall(r"`([^`\n]{3,200})`", text)
     deliver = []
@@ -35,7 +67,7 @@ def extract_root(text):
         low = c.lower()
         if not low.endswith(EXT_OK):
             continue
-        if any(h.lower() in low for h in INPUT_HINT):
+        if _is_input(c):
             continue
         if "output" in low or "submission" in low or low.startswith("/"):
             deliver.append(c)
@@ -43,7 +75,7 @@ def extract_root(text):
     m = re.search(r"(?:write|save|deliver|put|place)[^`\n]{0,60}`([^`\n]+)`", text, re.I)
     if m:
         p = m.group(1)
-        if p.lower().endswith(EXT_OK):
+        if p.lower().endswith(EXT_OK) and not _is_input(p):
             return p.strip()
     return deliver[-1].strip() if deliver else ""
 
@@ -91,8 +123,11 @@ def build(instruction, task_md=""):
     # explicit file list from ### blocks, else backticked filenames
     names = list(blocks.keys())
     if not names:
-        names = sorted({os.path.basename(p) for p in re.findall(r"`([^`\n]{3,120})`", text)
-                        if p.lower().endswith(EXT_OK)})
+        named_files = {os.path.basename(p) for p in re.findall(r"`([^`\n]{3,120})`", text)
+                       if p.lower().endswith(EXT_OK)}
+        if root.lower().endswith(EXT_OK):
+            named_files.add(os.path.basename(root))
+        names = sorted(named_files)
 
     headers = {n: parse_header(b) for n, b in blocks.items() if parse_header(b)}
     if not headers:
@@ -105,11 +140,10 @@ def build(instruction, task_md=""):
 
     mode = "?"
     low = root.lower()
-    for ext, m in ((".zip", "zip"), (".docx", "docx"), (".xlsx", "xlsx"), (".ifc", "ifc"), (".py", "py")):
-        if low.endswith(ext):
-            mode = m
-            break
-    if mode == "?" and low.endswith("/"):
+    extension = posixpath.splitext(low)[1]
+    if extension in (".zip", ".docx", ".xlsx", ".ifc", ".py", ".json", ".txt", ".csv"):
+        mode = extension[1:]
+    elif low.endswith("/"):
         mode = "dir"
     if mode == "?" and names:
         exts = {os.path.splitext(n)[1].lower() for n in names}

@@ -14,6 +14,7 @@ from pathlib import Path
 import shlex
 import sys
 import tempfile
+import time
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -115,7 +116,7 @@ class ExerciseTransport(LocalTransport):
             parts = shlex.split(command)
         except ValueError:
             return failure("quote the program in `python3 -c '<program>'`")
-        if len(parts) != 3 or parts[0] not in {"python", "python3"} or parts[1] != "-c":
+        if len(parts) != 3 or parts[0] not in {"python", "python3", self.python_cmd} or parts[1] != "-c":
             return failure("the calculator accepts only `python3 -c '<program>'`")
         if len(parts[2].encode()) > MAX_PROGRAM_BYTES or "\x00" in parts[2]:
             return failure("calculator program is too large or contains a NUL byte")
@@ -176,11 +177,24 @@ class ExerciseModel:
 
     def __init__(self, client, docker_image=None):
         self.client = client
-        self.tools = EXERCISE_TOOLS + ([CALCULATOR_TOOL] if docker_image else [])
+        self.tools = list(EXERCISE_TOOLS)
+        if docker_image:
+            self.tools.append(CALCULATOR_TOOL)
+            self.tools.extend(tool for tool in TOOLS if tool["name"] == "run_python")
         self.tool_names = {tool["name"] for tool in self.tools}
 
     async def chat(self, messages, system):
-        response = await self.client.chat(messages, system, tools=self.tools)
+        started = time.monotonic()
+        try:
+            response = await self.client.chat(messages, system, tools=self.tools)
+        except asyncio.CancelledError:
+            print(f"Inference interrupted after {time.monotonic() - started:.1f}s.", flush=True)
+            raise
+        names = [c["name"] for c in response["tool_calls"] if c["name"] in self.tool_names]
+        usage = response.get("usage") or {}
+        print(f"Inference completed in {time.monotonic() - started:.1f}s; "
+              f"tools={','.join(names) or 'none'}; "
+              f"tokens={usage.get('input_tokens', 0)}/{usage.get('output_tokens', 0)}.", flush=True)
         for call in response["tool_calls"]:
             arguments = call["arguments"]
             if call["name"] == "write_file" and (

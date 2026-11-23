@@ -6,9 +6,12 @@ anything), skill routed second, one minimal complete deliverable early, then
 guard-driven iteration until the guard passes or time runs out.
 """
 import asyncio
+import base64
 
 from . import specgen, router
 from .guard import Guard
+from .model import PYTHON_SOURCE_MAX, PYTHON_TIMEOUT_DEFAULT, PYTHON_TIMEOUT_MAX
+from .transport import quote_path
 
 MAX_STEPS = 240
 HARD_BUDGET = 0.94      # fraction of agent_timeout_sec we allow ourselves
@@ -24,8 +27,8 @@ Non-negotiables:
 - Follow the task's explicit deliverable requirements. Use the inferred contract below as
   a checklist and verify its exact paths, filenames, column headers and required contents
   against the task instructions and relevant input documents.
-- Work inside the task container with exec/read_file/write_file/mcp_call. python3 is present
-  with python-docx, openpyxl, pandas, libreoffice and pdftotext.
+- Work inside the task container with exec/run_python/read_file/write_file/mcp_call.
+  python3 is present with python-docx, openpyxl, pandas, libreoffice and pdftotext.
 - Read the task inputs before writing. Reconcile conflicting documents explicitly and say
   which one governs.
 - Land a first complete, openable version of the deliverable early (by roughly step 10-20),
@@ -38,6 +41,8 @@ Non-negotiables:
 
 Tool notes:
 - exec keeps only filesystem state; cd and shell variables do not persist.
+- Use run_python for multistep numerical calculations. Group related calculations in a
+  short invocation and print the resulting quantities and checks you need for the deliverable.
 - write_file creates parent directories. Use append for large files.
 - Build docx/xlsx with python-docx/openpyxl scripts you write, then run them with exec.
 """
@@ -85,12 +90,28 @@ class Harness:
 
     # ---------- prompt ----------
     def _system(self, snapshot):
-        parts = [SYSTEM_BASE]
+        path = self.spec.get("deliverable") or ""
+        single_data_file = (
+            path.lower().endswith((".json", ".csv", ".txt"))
+            and len(self.spec.get("all_named_files") or []) <= 1
+            and (self.spec.get("claimed_count") or 1) == 1
+        )
+        if single_data_file:
+            parts = [
+                "Deliver the single requested file in the task workspace. Read the named inputs. "
+                "For a calculation, call run_python with a short program and print the results. "
+                "Use the returned values to write the file immediately. Verify the exact path, "
+                "field names and units against the task, then call finish. "
+                "Use the available tools directly and keep the response concise."
+            ]
+        else:
+            parts = [SYSTEM_BASE]
         parts.append("\n=== ACCEPTANCE CONTRACT (auto-parsed from the instruction) ===\n"
                      + _fmt_contract(self.spec))
-        parts.append(f"\n=== ROUTED SKILL: {self.route['domain']} / {self.route['family']} ===")
-        for title, body in self._ctx:
-            parts.append(f"\n--- {title} ---\n{body}")
+        if not single_data_file:
+            parts.append(f"\n=== ROUTED SKILL: {self.route['domain']} / {self.route['family']} ===")
+            for title, body in self._ctx:
+                parts.append(f"\n--- {title} ---\n{body}")
         if self.mcp:
             urls = "\n".join(f"  {s.get('name')}: {s.get('url')} ({s.get('transport')})"
                              for s in self.mcp)
@@ -125,8 +146,23 @@ class Harness:
     async def _do(self, call):
         name = call["name"]
         a = call.get("arguments") or {}
-        if name == "exec":
-            r = await self.t.exec(a.get("command", ""), a.get("timeout_sec", 120))
+        if name in {"exec", "run_python"}:
+            if name == "run_python":
+                source = a.get("code")
+                if not isinstance(source, str) or not source.strip():
+                    return "[run_python] code must be a nonempty Python source string"
+                if len(source) > PYTHON_SOURCE_MAX or "\x00" in source:
+                    return f"[run_python] code must be at most {PYTHON_SOURCE_MAX} characters without NUL bytes"
+                timeout = a.get("timeout_sec", PYTHON_TIMEOUT_DEFAULT)
+                if type(timeout) is not int or not 1 <= timeout <= PYTHON_TIMEOUT_MAX:
+                    return f"[run_python] timeout_sec must be an integer from 1 to {PYTHON_TIMEOUT_MAX}"
+                # Encode model source as data, including shell metacharacters and newlines.
+                encoded = base64.b64encode(source.encode()).decode("ascii")
+                program = f"import base64; exec(compile(base64.b64decode('{encoded}'), '<run_python>', 'exec'))"
+                command = f"{quote_path(self.t.python_cmd)} -c {quote_path(program)}"
+            else:
+                command, timeout = a.get("command", ""), a.get("timeout_sec", 120)
+            r = await self.t.exec(command, timeout)
             body = (r.get("output") or "")[:14000]
             tag = "" if r.get("ok") else f"[exit {r.get('exit_code')}] "
             return f"{tag}{body}"
@@ -142,7 +178,6 @@ class Harness:
         if name == "write_file":
             content = a.get("content", "")
             if a.get("b64"):
-                import base64
                 blob = base64.b64decode(content)
             else:
                 blob = content.encode()
@@ -166,9 +201,8 @@ class Harness:
             if r.get("ok") is False and r.get("status") is None:
                 return f"[mcp_call] relay failed: {r.get('error') or 'no HTTP response'}"
 
-            import base64 as _b
             try:
-                txt = _b.b64decode(r.get("body_b64") or "", validate=True).decode("utf-8", "replace")
+                txt = base64.b64decode(r.get("body_b64") or "", validate=True).decode("utf-8", "replace")
             except (TypeError, ValueError):
                 txt = "[invalid HTTP response body encoding]"
 

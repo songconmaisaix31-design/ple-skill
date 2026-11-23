@@ -153,6 +153,14 @@ def main():
         check_docx(path, "docx")
     elif low.endswith(".xlsx"):
         check_xlsx(path, "xlsx")
+    elif low.endswith(".json"):
+        try:
+            with open(path, encoding="utf-8-sig") as source:
+                json.load(source)
+        except (ValueError, OSError) as exc:
+            fail(f"JSON 解析失败：{exc}")
+        else:
+            ok("JSON 可解析")
     else:
         ok("非容器格式，只做存在性检查")
 
