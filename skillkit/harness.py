@@ -27,6 +27,9 @@ NAMED_TEXT_INPUT = re.compile(
     r"(?<![\w./-])(?:\./)?(inputs?/(?:[\w-]+/)*[\w.-]+\.(?:json|csv|txt))"
     r"(?=$|[\s`\"'(),.;:])", re.IGNORECASE,
 )
+DATA_FILE_TYPES = (".json", ".csv", ".txt")
+NAMED_FILE = re.compile(r"(?<![\w./-])([A-Za-z0-9_./-]+\.[A-Za-z][A-Za-z0-9]{1,9})"
+                        r"(?![\w/-]|\.[\w.-])")
 
 SYSTEM_BASE = """You are an agent harness solving one engineering task inside a sandboxed container.
 
@@ -123,7 +126,50 @@ class Harness:
             and (self.spec.get("claimed_count") or 1) == 1
         )
 
-    def _system(self, snapshot):
+    async def _compact_package(self, snapshot):
+        outputs = self.spec.get("required_files") or []
+        count = self.spec.get("claimed_count")
+        if (self.mcp or not 2 <= len(outputs) <= 3 or (count is not None and count != len(outputs))
+                or not all(path.lower().endswith(DATA_FILE_TYPES) for path in outputs)):
+            return [], snapshot
+        if outputs != specgen.build(self.instruction).get("required_files"):
+            return [], snapshot
+
+        task_text, separator, tree = snapshot.partition("\n--- tree ---\n")
+        header = "--- task.md ---\n"
+        if (len(snapshot) >= 7000 or not separator or not task_text.startswith(header)
+                or task_text.removeprefix(header).strip() not in {"", self.instruction.strip()}):
+            return [], snapshot
+        paths = list(dict.fromkeys(NAMED_TEXT_INPUT.findall(self.instruction)))
+        if not 1 <= len(paths) <= 3:
+            return [], snapshot
+
+        workspace = self.workdir.rstrip("/") + "/"
+
+        def relative(path):
+            return posixpath.normpath(path).removeprefix(workspace)
+
+        declared = {relative(path) for path in (*outputs, *paths)} | {"task.md"}
+        named = {relative(path) for path in NAMED_FILE.findall(self.instruction)}
+        entries = [relative(line) for line in tree.splitlines() if line.startswith("./")]
+        if (len(entries) >= 120 or not set(paths) <= set(entries) or not named <= declared
+                or not set(entries) <= declared):
+            return [], snapshot
+
+        loaded = []
+        size = 0
+        for path in paths:
+            try:
+                data = await self.t.read_file(path)
+                if not data or len(data) > 4096 or size + len(data) > 8192 or b"\x00" in data:
+                    return [], snapshot
+                loaded.append((path, data.decode("utf-8-sig")))
+                size += len(data)
+            except (OSError, ValueError):
+                return [], snapshot
+        return loaded, "--- tree ---\n" + tree
+
+    def _system(self, snapshot, compact_package=False):
         single_data_file = self._single_data_file()
         if single_data_file:
             parts = [
@@ -134,11 +180,21 @@ class Harness:
                 "field names and units against the task, then call finish. "
                 "Use the available tools directly and keep the response concise."
             ]
+        elif compact_package:
+            parts = [
+                "Produce all declared files in the task workspace. The prompt includes the named input data. "
+                "Use one short run_python program to load the original inputs, perform the requested calculation or "
+                "transformation, create output directories, and write each actual deliverable at its declared path. "
+                "The program writes multiple files itself, so leave output_path unset. Follow any method the task "
+                "specifies. If a finite set of options is small, you can enumerate candidates, discard infeasible "
+                "ones, and select by the requested objective. Verify computed values and the written files' paths, "
+                "formats, fields, and units. Keep tool output concise, then call finish."
+            ]
         else:
             parts = [SYSTEM_BASE]
         parts.append("\n=== ACCEPTANCE CONTRACT (auto-parsed from the instruction) ===\n"
                      + _fmt_contract(self.spec))
-        if not single_data_file:
+        if not single_data_file and not compact_package:
             parts.append(f"\n=== ROUTED SKILL: {self.route['domain']} / {self.route['family']} ===")
             for title, body in self._ctx:
                 parts.append(f"\n--- {title} ---\n{body}")
@@ -448,14 +504,19 @@ class Harness:
 
     async def _run(self, on_usage, on_log, wrap_at, clock):
         snapshot = await self._snapshot()
-        system = self._system(snapshot)
+        package_inputs, snapshot = await self._compact_package(snapshot)
+        system = self._system(snapshot, compact_package=bool(package_inputs))
         on_log(f"spec: {self.spec.get('deliverable')} mode={self.spec.get('mode')} "
                f"conf={self.spec.get('confidence')} | skill={self.route['domain']}"
                f"/{self.route['family']}")
 
         prompt = "Task instruction:\n\n" + self.instruction
-        supplied_input = False
-        if self._single_data_file():
+        supplied_input = bool(package_inputs)
+        if package_inputs:
+            on_log("using compact prompt for a small declared text package")
+            for path, body in package_inputs:
+                prompt += f"\n\nInput already obtained with read_file from {path}:\n{body}"
+        elif self._single_data_file():
             paths = list(dict.fromkeys(NAMED_TEXT_INPUT.findall(self.instruction)))
             for path in paths[:2]:
                 try:
