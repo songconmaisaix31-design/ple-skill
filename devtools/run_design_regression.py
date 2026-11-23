@@ -253,9 +253,10 @@ def first_code_action(lines):
     return None
 
 
-ARCHIVE_VARIANTS = ("d", "e", "f", "g", "h", "i", "j", "k")
-CONTROLLED_VARIANTS = ("h", "i", "j", "k")
-PATCH_VARIANTS = ("j", "k")
+ARCHIVE_VARIANTS = ("d", "e", "f", "g", "h", "i", "j", "k", "l", "m")
+CONTROLLED_VARIANTS = ("h", "i", "j", "k", "l", "m")
+PATCH_VARIANTS = ("j", "k", "l", "m")
+NATIVE_PATCH_VARIANTS = ("l", "m")
 CONTROLLED_RELEASE_SEC = 250
 CONTROLLED_ARCHIVE_SHA256 = "511905b2bc72f17b92abf364eade2e2cfd2b060b86419796197f37968b5204e7"
 CONTROLLED_SOURCE_SHA256 = "eba7247453712a78c991e152dd1e4bf08d80474429601e25ec7ae6fd6fbb7381"
@@ -268,6 +269,19 @@ Repair action contract: reply with exactly one compact JSON object and no Markdo
 The host preserves the existing indentation, applies only that line, parses the complete program,
 and runs it. Do not return the full program. The replacement must be at most 160 characters.
 """.rstrip()
+PATCH_TOOL = {
+    "name": "replace_line",
+    "description": "Replace exactly line 81 of the failed Python program. The host preserves indentation, validates the full program, and executes it.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "line": {"type": "integer", "enum": [81]},
+            "replacement": {"type": "string", "minLength": 1, "maxLength": 160},
+        },
+        "required": ["line", "replacement"],
+        "additionalProperties": False,
+    },
+}
 
 
 def apply_constrained_patch(source, raw):
@@ -508,7 +522,37 @@ class ControlledPatchModel(ControlledFirstModel):
         repaired, event = apply_constrained_patch(self.source, raw)
         event["end_sec"] = round(self.elapsed(), 3)
         if repaired is not None:
-            result = {**result, "content": f"```python\n{repaired}\n```"}
+            result = {**result, "content": "", "tool_calls": [{
+                "id": f"host-patch-{self.archive.requests}", "name": "run_python",
+                "arguments": {"code": repaired},
+            }]}
+        self.archive.write({"event": "patch_application", "call": self.archive.requests, **event})
+        self.first_events["patch_application"] = event
+        return result
+
+
+class ControlledNativePatchModel(ControlledFirstModel):
+    """Expose one required native replace_line tool, then guard and execute it."""
+
+    async def chat(self, messages, system, tools=None, **kwargs):
+        if not self.used:
+            return await super().chat(messages, system, tools=tools, **kwargs)
+        result = await self.live.chat(
+            messages, system, tools=[PATCH_TOOL], tool_choice="required",
+            **{**kwargs, "max_tokens": 96},
+        )
+        calls = result.get("tool_calls") or []
+        arguments = calls[0].get("arguments") if (len(calls) == 1
+                    and calls[0].get("name") == "replace_line") else None
+        raw = json.dumps(arguments, sort_keys=True, separators=(",", ":")) if isinstance(arguments, dict) else None
+        repaired, event = apply_constrained_patch(self.source, raw)
+        event.update(end_sec=round(self.elapsed(), 3), native_call_count=len(calls),
+                     native_tool=(calls[0].get("name") if len(calls) == 1 else None))
+        if repaired is not None:
+            result = {**result, "content": "", "tool_calls": [{
+                "id": calls[0].get("id") or f"host-native-patch-{self.archive.requests}",
+                "name": "run_python", "arguments": {"code": repaired},
+            }]}
         self.archive.write({"event": "patch_application", "call": self.archive.requests, **event})
         self.first_events["patch_application"] = event
         return result
@@ -539,7 +583,8 @@ async def task_container(inputs, fixture_paths):
 
 
 async def measure(workspace, variant, seconds, kit_root, check_transport=False, checkpoint_sec=None,
-                  archive_path=None, controlled_first=False, controlled_patch=False):
+                  archive_path=None, controlled_first=False, controlled_patch=False,
+                  controlled_native_patch=False):
     sys.path.insert(0, str(kit_root))
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import websockets
@@ -587,7 +632,8 @@ async def measure(workspace, variant, seconds, kit_root, check_transport=False, 
                     model_attempts, first_events, lambda: time.monotonic() - started, archive))
                 if controlled_first:
                     from skillkit.model import from_env as configured_model
-                    wrapper_class = ControlledPatchModel if controlled_patch else ControlledFirstModel
+                    wrapper_class = (ControlledNativePatchModel if controlled_native_patch else
+                                     ControlledPatchModel if controlled_patch else ControlledFirstModel)
                     wrapper = wrapper_class(
                         configured_model(), controlled_program(),
                         lambda: time.monotonic() - started, archive, model_attempts, first_events)
@@ -683,6 +729,8 @@ def main():
                         help="Use the frozen failed first program for a controlled repair diagnostic")
     parser.add_argument("--controlled-patch-repair", action="store_true",
                         help="Request and guard a one-line JSON patch after the controlled failure")
+    parser.add_argument("--controlled-native-patch", action="store_true",
+                        help="Require the sole native replace_line tool after the controlled failure")
     args = parser.parse_args()
     if not 1 <= args.timeout_sec <= 21600:
         parser.error("time budget must be between 1 and 21600 seconds")
@@ -696,11 +744,15 @@ def main():
     if args.checkpoint_only_sec is not None and (args.check_transport or not 0 < args.checkpoint_only_sec < args.timeout_sec):
         parser.error("--checkpoint-only-sec needs a full model run and must be shorter than --timeout-sec")
     if args.controlled_first_program != (args.variant in CONTROLLED_VARIANTS):
-        parser.error("--controlled-first-program is required exactly for H/I/J/K")
+        parser.error("--controlled-first-program is required exactly for H/I/J/K/L/M")
     if args.controlled_first_program and (args.archive_model_io is None or args.checkpoint_only_sec != 395):
         parser.error("controlled repair replay requires model IO archival and the frozen 395-second cutoff")
     if args.controlled_patch_repair and args.variant not in PATCH_VARIANTS:
-        parser.error("--controlled-patch-repair is available only for J/K")
+        parser.error("--controlled-patch-repair is available only for J/K/L/M")
+    if args.controlled_native_patch and args.variant not in NATIVE_PATCH_VARIANTS:
+        parser.error("--controlled-native-patch is available only for L/M")
+    if args.controlled_patch_repair and args.controlled_native_patch:
+        parser.error("choose exactly one controlled patch interface")
     kit = args.kit_root.resolve()
     if not (kit / "kit" / "relay.py").is_file():
         parser.error("the kit checkout must contain kit/relay.py")
@@ -714,11 +766,13 @@ def main():
             parser.error("--keep-dir must not exist")
         return asyncio.run(measure(workspace, args.variant, args.timeout_sec, kit,
                                    args.check_transport, args.checkpoint_only_sec, args.archive_model_io,
-                                   args.controlled_first_program, args.controlled_patch_repair))
+                                   args.controlled_first_program, args.controlled_patch_repair,
+                                   args.controlled_native_patch))
     with tempfile.TemporaryDirectory(prefix="ple-design-") as temporary:
         return asyncio.run(measure(Path(temporary) / "task", args.variant, args.timeout_sec, kit,
                                    args.check_transport, args.checkpoint_only_sec, args.archive_model_io,
-                                   args.controlled_first_program, args.controlled_patch_repair))
+                                   args.controlled_first_program, args.controlled_patch_repair,
+                                   args.controlled_native_patch))
 
 
 if __name__ == "__main__":
