@@ -60,6 +60,31 @@ jobs:
           "$test_env/bin/python" devtools/workbook_regression.py
           "$test_env/bin/python" devtools/code_action_regression.py
 
+      - name: Replay the frozen paired experiment from archived files
+        shell: bash
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          records=docs/experiments/paired-storage-v1
+          python3 devtools/verify_paired_storage_evidence.py \
+            --archive "$records/evidence.zip" --protocol "$records/protocol.json" \
+            --expected-sha 52dc6b2f683dc5295529843530fe2ee4ea6e1c71 \
+            --csv "$RUNNER_TEMP/ple-trials.csv" --details "$RUNNER_TEMP/ple-code-coverage.json"
+          python3 devtools/paired_storage_report.py "$RUNNER_TEMP/ple-trials.csv" --output "$RUNNER_TEMP/ple-summary.json"
+          python3 - "$records" "$RUNNER_TEMP" <<'PY'
+          import csv
+          import json
+          import sys
+          from pathlib import Path
+
+          saved, replay = map(Path, sys.argv[1:])
+          with (saved / "trials.csv").open(newline="") as a, (replay / "ple-trials.csv").open(newline="") as b:
+              if list(csv.DictReader(a)) != list(csv.DictReader(b)):
+                  raise SystemExit("Replayed trial records differ from the archived table")
+          for name in ("summary", "code-coverage"):
+              if json.loads((saved / f"{name}.json").read_bytes()) != json.loads((replay / f"ple-{name}.json").read_bytes()):
+                  raise SystemExit(f"Replayed {name} differs from the archived record")
+          PY
+
       - name: Exchange the authorized runner identity for a temporary Hugging Face token
         if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' }}
         shell: bash
