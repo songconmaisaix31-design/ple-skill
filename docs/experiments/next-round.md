@@ -1,5 +1,11 @@
 # PLE 实验接续记录
 
+## H/I 受控修复实验正在执行
+
+H/I 六个同机配对已在 [GitHub Actions 45245913028](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45245913028) 启动。冻结的运行提交为 [`9fcdb2b8`](https://github.com/songconmaisaix31-design/ple-skill/tree/9fcdb2b859cf0cd892cc3d2638642df6b8f00ca0)，两组共用第 250 秒释放的失败首答，第 395 秒读取实际交付文件。六个任务均通过输入、故障程序、独立评分器、源码反馈包装器和 Docker 传输自检后进入配对运行。接续时沿用该 run ID，已有结果先归档并从文件复评。
+
+首次启动 [45245652599](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45245652599) 在模型加载前由正负对照终止。原因是独立实验分支没有携带协议指定的历史 D 证据包。六个任务均未开始推理或产生实验分数。该尝试保留为基础设施失败；补入 SHA-256 为 `511905b2bc72f17b92abf364eade2e2cfd2b060b86419796197f37968b5204e7` 的只读证据包后启动当前运行。
+
 ## F/G 已完成，保留首轮 Python 基线
 
 第 395 秒，F/G 六个同机配对的两臂均拿到满分。三次跨题平均分差均为 0，配对差样本方差为 0。六次候选都在首轮成功，实际源码反馈曝光 0/6。根据冻结协议，关于修复提示是否有益的证据不足。保留现有首轮 Python 策略，F/G 转入开发数据。[实验报告及逐次交付](repair-source-v1/README.md) · [F/G 运行](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45232669702)
@@ -24,3 +30,4 @@ H/I 已通过离线正负对照。两题以错误程序运行时均无交付、�
 ## 正式 PLE 开发集
 
 正式题最近一次运行在获取受限数据前收到 Hugging Face OIDC 的 `invalid_grant`，评分步骤跳过。当前未取得正式开发集得分。正式成绩单列，保留对应的模型、官方任务、评分器及运行证据。[正式题运行](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45204574378/job/137796706042) · [官方数据集](https://huggingface.co/datasets/google/physical-engineerings-last-exam)
+
