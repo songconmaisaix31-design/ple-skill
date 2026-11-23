@@ -1,0 +1,113 @@
+name: PLE cloud Docker check
+
+on:
+  push:
+    branches: [codex/ple-cloud-check]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  official-kit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Build through Docker with the official PLE kit
+        shell: bash
+        run: |
+          docker version
+          python3 -m venv "$RUNNER_TEMP/bootstrap"
+          "$RUNNER_TEMP/bootstrap/bin/python" -m pip install --disable-pip-version-check uv
+          echo "$RUNNER_TEMP/bootstrap/bin" >> "$GITHUB_PATH"
+          export PATH="$RUNNER_TEMP/bootstrap/bin:$PATH"
+          kit="$RUNNER_TEMP/ple-official"
+          git init -q "$kit"
+          git -C "$kit" fetch --depth 1 https://github.com/google-research/ple.git 8320f0402fdca9f42476607f72bcfd5271cd50c9
+          git -C "$kit" checkout -q --detach FETCH_HEAD
+          cd "$kit"
+          uv sync
+          uv run python -m kit validate "$GITHUB_WORKSPACE"
+          uv run python -m kit build "$GITHUB_WORKSPACE" --work "$RUNNER_TEMP/ple-kit"
+
+      - name: Exercise Docker, WebSocket and MCP with a synthetic model
+        shell: bash
+        run: |
+          # This local fixture is used by kit check only. It has no dev tasks or model keys.
+          cat > "$RUNNER_TEMP/ple-model-stub.py" <<'PY'
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          import json
+          import re
+          import time
+
+          def tool(call_id, name, **params):
+              return {"id": call_id, "type": "tool_use", "name": name, "input": params}
+
+          def messages(data):
+              history = data["messages"]
+              prompt = history[0]["content"][0]["text"]
+              if "10 MW data hall" in prompt:
+                  time.sleep(65)  # The official kit cancels this request after 45 seconds.
+                  return []
+              if "hello.txt" in prompt:
+                  return [tool("hello", "write_file", path="/app/hello.txt", content="HELLO\n"),
+                          tool("done", "finish", final_message="done")]
+              if "secret_word" not in prompt:
+                  raise ValueError("unexpected synthetic smoke task")
+              if len(history) == 1:
+                  request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                             "params": {"name": "secret_word", "arguments": {}}}
+                  return [tool("fetch", "mcp_call", method="POST",
+                               url="http://127.0.0.1:8000/mcp/", body=json.dumps(request))]
+              outputs = [item["content"] for item in history[-1]["content"]
+                         if item["type"] == "tool_result"]
+              word = re.search(r"\bMCP-[0-9A-F]{8}\b", "\n".join(outputs))
+              if not word:
+                  raise ValueError("synthetic MCP output absent")
+              return [tool("write", "write_file", path="/app/mcp.txt", content=word.group()),
+                      tool("finish", "finish", final_message="done")]
+
+          class Handler(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  self.reply(200, {"ready": True})
+
+              def do_POST(self):
+                  data = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                  if self.path == "/v1/chat/completions":
+                      self.reply(200, {"choices": [{"message": {"content": "OK"}}]})
+                  elif self.path == "/v1/messages":
+                      try:
+                          result = messages(data)
+                      except ValueError as exc:
+                          self.reply(400, {"error": str(exc)})
+                          return
+                      self.reply(200, {"content": result,
+                                       "usage": {"input_tokens": 1, "output_tokens": 1}})
+                  else:
+                      self.reply(404, {"error": "unknown endpoint"})
+
+              def reply(self, code, data):
+                  body = json.dumps(data).encode()
+                  self.send_response(code)
+                  self.send_header("Content-Type", "application/json")
+                  self.send_header("Content-Length", str(len(body)))
+                  self.end_headers()
+                  try:
+                      self.wfile.write(body)
+                  except BrokenPipeError:
+                      pass
+
+          ThreadingHTTPServer(("0.0.0.0", 4100), Handler).serve_forever()
+          PY
+          python3 "$RUNNER_TEMP/ple-model-stub.py" > "$RUNNER_TEMP/ple-model-stub.log" 2>&1 &
+          stub_pid=$!
+          trap 'kill "$stub_pid"' EXIT
+          curl --fail --silent --retry 20 --retry-connrefused --retry-delay 1 http://127.0.0.1:4100/ready >/dev/null
+          export MODEL_PROXY_URL=http://127.0.0.1:4100
+          export MODEL_PROXY_KEY=offline-smoke
+          cd "$RUNNER_TEMP/ple-official"
+          uv run python -m kit check "$GITHUB_WORKSPACE" --work "$RUNNER_TEMP/ple-kit" --cancel-test
