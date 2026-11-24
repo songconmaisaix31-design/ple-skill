@@ -1,0 +1,17 @@
+{
+  "model": "Gemma 4 26B A4B (self-hosted GGUF)",
+  "n_public_tasks": 29,
+  "observations": [
+    {
+      "task": "wind-diaphragm-shear",
+      "run_id": "45337685121",
+      "job_url": "https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45337685121/job/138253542503",
+      "score": 0.0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "checks_only": true,
+      "independent_regrade": false,
+      "outcome": "Measured zero; export unverified"
+    }
+  ]
+}

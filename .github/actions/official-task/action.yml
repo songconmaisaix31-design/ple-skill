@@ -1,0 +1,27 @@
+name: "Evaluate and replay one frozen official task"
+description: "Run the kit once, retain the reviewed export, and grade its files independently"
+inputs:
+  task:
+    description: Official task identifier
+    required: true
+  hf-token:
+    description: Read access to the official dataset
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: bash devtools/official_entry.sh
+    - shell: bash
+      env:
+        TASK: ${{ inputs.task }}
+        HF_TOKEN: ${{ inputs.hf-token }}
+        HF_HUB_DISABLE_PROGRESS_BARS: '1'
+      run: bash devtools/official_task.sh
+    - if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: ple-export-${{ inputs.task }}-attempt-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/evidence
+        retention-days: 30
+        if-no-files-found: warn

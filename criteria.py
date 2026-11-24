@@ -284,7 +284,7 @@ def g11_known_blockers():
     rec("F-01", "无按题指纹分支（提交前人工复核最终 commit）", "TODO",
         "静态指纹已由 G-12 自动检查；提交前复核运行日志与最终 commit 内容", "B")
     rec("F-02", "artifacts 为提交版 harness 原样产出", "TODO",
-        "manifest.json 哈希需与代码同 commit；改代码必须重跑全量 dev", "B")
+        "用 kit artifacts 核对 manifest、文件和 harness 指纹；提交版运行代码变更后重新生成拟提交的题目产物", "B")
 
 
 def main():

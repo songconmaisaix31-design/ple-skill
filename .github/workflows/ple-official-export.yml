@@ -1,0 +1,124 @@
+name: PLE submission export
+on:
+  push:
+    branches: [codex/ple-official-export]
+  workflow_dispatch:
+    inputs:
+      pilot_run:
+        description: "For the remaining 28 tasks, provide the verified pilot run ID. Leave empty for a single pilot."
+        required: false
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: ple-official-export-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  plan:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Run official PLE export pilot' || startsWith(github.event.head_commit.message, 'Run official PLE export cohort ')
+    runs-on: ubuntu-24.04
+    outputs:
+      remaining: ${{ steps.tasks.outputs.remaining }}
+      prior: ${{ steps.mode.outputs.prior }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {fetch-depth: 0, persist-credentials: false}
+      - id: mode
+        env:
+          TITLE: ${{ github.event.head_commit.message }}
+          PRIOR: ${{ inputs.pilot_run }}
+        shell: bash
+        run: |
+          if [[ "$TITLE" == 'Run official PLE export cohort '* ]]; then
+            PRIOR=${TITLE#Run official PLE export cohort }
+            [[ -n "$PRIOR" ]]
+          fi
+          [[ -z "$PRIOR" || "$PRIOR" =~ ^[1-9][0-9]+$ ]]
+          echo "prior=$PRIOR" >> "$GITHUB_OUTPUT"
+      - run: bash devtools/official_entry.sh
+      - if: steps.mode.outputs.prior != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.mode.outputs.prior }}
+          pattern: ple-export-wind-diaphragm-shear-attempt-*
+          path: ${{ runner.temp }}/shards
+      - if: steps.mode.outputs.prior != ''
+        env:
+          PILOT_RUN: ${{ steps.mode.outputs.prior }}
+        run: '"$RUNNER_TEMP/ple-kit/.venv/bin/python" devtools/official_export.py validate-pilot'
+      - id: tasks
+        run: '"$RUNNER_TEMP/ple-kit/.venv/bin/python" devtools/official_export.py plan'
+  pilot:
+    needs: plan
+    if: needs.plan.outputs.prior == ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {fetch-depth: 0, persist-credentials: false}
+      - uses: ./.github/actions/official-task
+        with:
+          task: wind-diaphragm-shear
+          hf-token: ${{ secrets.PLE_HF_TOKEN }}
+  cohort:
+    needs: plan
+    if: needs.plan.outputs.prior != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        task: ${{ fromJSON(needs.plan.outputs.remaining) }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {fetch-depth: 0, persist-credentials: false}
+      - uses: ./.github/actions/official-task
+        with:
+          task: ${{ matrix.task }}
+          hf-token: ${{ secrets.PLE_HF_TOKEN }}
+  package:
+    needs: [plan, pilot, cohort]
+    if: always() && needs.plan.result == 'success' && (needs.pilot.result == 'success' || (needs.plan.outputs.prior != '' && !cancelled()))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      PILOT_RUN: ${{ needs.plan.outputs.prior }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {fetch-depth: 0, persist-credentials: false}
+      - run: bash devtools/official_entry.sh
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: ple-export-*-attempt-*
+          path: ${{ runner.temp }}/shards
+      - if: env.PILOT_RUN != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ env.PILOT_RUN }}
+          pattern: ple-export-wind-diaphragm-shear-attempt-*
+          path: ${{ runner.temp }}/shards
+      - run: |
+          set -euo pipefail
+          python="$RUNNER_TEMP/ple-kit/.venv/bin/python"
+          "$python" devtools/official_export.py assemble
+          entry="$RUNNER_TEMP/ple-entry"
+          git -C "$entry" add artifacts
+          git -C "$entry" -c user.name='PLE evaluation' -c user.email='ple@localhost' commit -qm 'Attach reviewed official task artifacts'
+          source devtools/official_model.sh
+          cd "$RUNNER_TEMP/ple-kit"
+          "$python" -m kit check "$entry" --cancel-test --work "$RUNNER_TEMP/ple-check"
+          "$python" -c 'import json,sys; sys.exit(json.load(open(sys.argv[1]))["ready"] is not True)' "$RUNNER_TEMP/ple-check/check.json"
+          cp "$RUNNER_TEMP/ple-check/check.json" "$RUNNER_TEMP/evidence/kit-check.json"
+          git -C "$entry" archive --format=tar.gz -o "$RUNNER_TEMP/evidence/submission.tar.gz" HEAD
+          sha256sum "$RUNNER_TEMP/evidence/submission.tar.gz" | cut -d' ' -f1 > "$RUNNER_TEMP/evidence/submission.sha256"
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ple-official-package-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: warn
+          retention-days: 30
