@@ -6,6 +6,12 @@
 
 这两项登记都使用 GitHub Actions 上自托管的 Unsloth 量化权重。官方 kit 允许用兼容代理在开发端运行；赛事要求 harness 实际调用声明的赞助模型。尚无证据认定该第三方量化端与官方模型相同。即使获得可重评的文件，也仅归档为开发诊断。提交用的产物须由已核实的赞助模型重新生成。保留实际服务提供方、请求和响应模型标识、运行与用量记录（不含密钥），再对该产物运行官方审查、从文件复评及 kit check。优先使用已授权并核实的端点。若切换模型或精度，另立基线；此前自托管产物不能混入参赛包。[官方模型与代理](https://github.com/google-research/ple/blob/8320f0402fdca9f42476607f72bcfd5271cd50c9/docs/models.md) · [公平竞赛要求](https://github.com/google-research/ple/blob/8320f0402fdca9f42476607f72bcfd5271cd50c9/docs/rules.md#fair-play)
 
+### 已核实的托管推理入口及待测项
+
+11 月 24 日的同一份作业日志分别记录了受限数据集可读、通过 HF 代理的 GLM-5.2 探测返回 HTTP 402，以及自托管 Gemma 探测成功。这三项涉及不同权限。HF 目录列出可路由模型，不能据此确认账号额度。当前尚未观察到本项目成功调用托管赞助模型。[实际探测日志](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45337685121/job/138253542503)
+
+谷歌文档给出了同架构模型的精确服务标识 `gemma-4-26b-a4b-it`。先用一个公开的合成函数调用核对 Google 一方服务的响应模型、函数参数及用量。凭据由仓库 Actions secret `PLE_GEMINI_API_KEY` 注入；在 export 分支使用精确标题 `Probe hosted PLE Gemma`，不读取开发题。该探测仅执行一次；缺凭据或额度时保留结果，待配置改变再试。即使探测成功，仍须核实正式题的数据使用条款：Google 免费层注明内容可用于改进产品。在此之前只发送合成输入。官方 kit 还提供由参与者项目计费的 Vertex 代理，未登记付费运行。[Google 精确模型示例](https://gemma.ai/deployment/gemini-api/) · [Gemma 4 定价与数据使用](https://ai.google.dev/gemini-api/docs/pricing#gemma-4) · [官方 kit 的 Vertex 映射](https://github.com/google-research/ple/blob/8320f0402fdca9f42476607f72bcfd5271cd50c9/kit/model_proxy/config.yaml)
+
 ### 研究如何影响实验选择
 
 | 原始研究 | 观察与本项目的决定 |

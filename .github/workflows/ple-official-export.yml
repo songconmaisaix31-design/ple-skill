@@ -17,6 +17,26 @@ concurrency:
   group: ple-official-export-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  hosted-gemma-probe:
+    if: github.event_name == 'push' && github.event.head_commit.message == 'Probe hosted PLE Gemma'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - name: Verify one hosted Gemma tool call
+        env:
+          PLE_GEMINI_API_KEY: ${{ secrets.PLE_GEMINI_API_KEY }}
+        run: python3 devtools/google_gemma_probe.py > "$RUNNER_TEMP/hosted-gemma-probe.json"
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: hosted-gemma-probe-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hosted-gemma-probe.json
+          if-no-files-found: error
+          retention-days: 30
   plan:
     if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Run official PLE export pilot' || github.event.head_commit.message == 'Run official PLE export single data-hall-mep-routing' || startsWith(github.event.head_commit.message, 'Run official PLE export cohort ')
     runs-on: ubuntu-24.04
