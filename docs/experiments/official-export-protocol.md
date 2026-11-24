@@ -1,6 +1,8 @@
 # 正式开发集的交付与文件重评
 
-第一步仅运行 `wind-diaphragm-shear`。沿用提交 harness，准备独立 Git 仓库，根目录包含 MIT 许可证。生成和提交均声明 `google-cloud/gemma-4-26b`。生成端为自托管的 Unsloth Gemma 4 26B A4B IT，量化文件 `UD-IQ2_XXS`，SHA-256 为 `52f98e6fc6df62438dff8f57ac049f60b4c36acf93786b6aeeedc129acc02343`。llama.cpp 为 b12651，默认贪心采样，种子 17，8192 上下文，一个并发槽位，最多四个 CPU 线程。规则型题目使用任务自带的检查器。需要语言模型评审时使用相同的自托管 Gemma，赛事方会重新评分。
+第一步仅运行 `wind-diaphragm-shear`。沿用提交 harness，准备独立 Git 仓库，根目录包含 MIT 许可证。生成和提交均声明 `google-cloud/gemma-4-26b`。生成端为自托管的 Unsloth Gemma 4 26B A4B IT，量化文件 `UD-IQ2_XXS`，SHA-256 为 `52f98e6fc6df62438dff8f57ac049f60b4c36acf93786b6aeeedc129acc02343`。llama.cpp 为 b12651，默认贪心采样，种子 17，正式候选 16384 上下文，一个并发槽位，最多四个 CPU 线程。规则型题目使用任务自带的检查器。需要语言模型评审时使用相同的自托管 Gemma，赛事方会重新评分。
+
+**wind 单题的上下文实验。** 基线提交 `ce7abfe1ea8968e0cd777793558aaa5b4903152b` 在 [Actions 45340782388](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45340782388) 中使用 8192 上下文。评分器实测 0/1，捕获文件 0，记录 input 12789、output 81、cache 5815 tokens。其日志标记为 `context_limit`、`http_4xx`、`export_empty`。累计输入 token 数包含多次调用。正式候选仅将 llama.cpp 的上下文上限升至 16384。模型权重、生成代码、种子、采样和并发与基线一致。首次探测检查是否仍触发上下文错误、捕获文件数和可独立重评分数；如未交付则保留本次尝试并停止扩展。数据快照或运行限制有差异时按下段分别报告。
 
 **输入与可比性。** 评分与导出使用官方 kit `8320f0402fdca9f42476607f72bcfd5271cd50c9`。新流程固定 kit 在 `eval/dev_set.yaml` 登记的任务库版本 `b3857a3fea39a695e18f845d4a88f29442e96e75`，逐题使用 kit 的 `tree_sha256` 核对目录。先前的 wind 单题使用 `e0c21fa558c3127785656398e3b3bd7da5e5a5a6`；新单题另外读取该版本并记录两份任务目录的 SHA-256。哈希不一致或缺失时，单列为新基线。两次输入一致时仍需核对 harness、时间限制和评分器后才能比较。
 

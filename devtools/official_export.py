@@ -79,7 +79,7 @@ def download(task):
                          "architecture": platform.machine(), "logical_cpus": os.cpu_count(),
                          "memory_bytes": os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"),
                          "free_disk_bytes_at_input": shutil.disk_usage(TEMP).free},
-              "cpu_inference": {"max_threads": 4, "context": 8192, "concurrent_slots": 1},
+              "cpu_inference": {"max_threads": 4, "context_requested": 16384, "concurrent_slots": 1},
               "harbor": "0.20.0", "judge_model": "gemma-4-26b", "repetitions": 1}
     write("input.json", record)
     token = os.environ.get("HF_TOKEN")
@@ -113,6 +113,20 @@ def download(task):
     write("input.json", record)
     if not record["input_verified"]:
         raise SystemExit("Official task contents differ from the frozen kit manifest.")
+
+
+def record_model(context, threads):
+    # Values come from model.env only after llama-server reports healthy.
+    observation = {"context_at_server_start": int(context), "threads": int(threads), "concurrent_slots": 1,
+                   "temperature": 0, "seed": 17, "build": "b12651", "model": MODEL}
+    write("model-runtime.json", observation)
+    path = EVIDENCE / "input.json"
+    if path.exists():
+        record = obj(path)
+        if record["cpu_inference"]["context_requested"] != observation["context_at_server_start"]:
+            raise SystemExit("Loaded model context differs from the frozen candidate.")
+        record["cpu_inference"].update(observation)
+        write("input.json", record)
 
 
 def summarize(task, phase, exit_code):
@@ -151,9 +165,11 @@ def summarize(task, phase, exit_code):
         observation.update(trial_result_present=bool(result), capture_present=bool(capture),
                            capture_error=bool(capture.get("error")), captured_file_count=len(capture.get("files", {})),
                            exception=exc if exc in EXCEPTIONS else ("other" if exc else None))
-        logs = "\n".join(tail(trial / "agent" / name) for name in ("serve.log", "skillguard-harness.txt", "egress.log"))
-        patterns = {"context_limit": r"context.length.exceeded|exceeds the available context|maximum context length",
-                    "model_call_failed": r"model call failed after retries", "http_4xx": r"\bhttp (?:400|401|403|413|429)\b"}
+        logs = "\n".join([text, str((result.get("exception_info") or {}).get("exception_message") or ""),
+                          *(tail(trial / "agent" / name) for name in ("serve.log", "skillguard-harness.txt", "egress.log"))])
+        patterns = {"context_limit": r"context.length.exceeded|context.window.exceed|prompt is too long|exceeds the available context|maximum context length",
+                    "model_call_failed": r"model call failed after retries", "http_4xx": r"\bhttp (?:400|401|403|404|413|429)\b",
+                    "export_empty": r"no dev task.*has usable artifacts"}
         observation["diagnostics"] += [k for k, v in patterns.items() if re.search(v, logs, re.I)]
     manifest = safe_json(run_dir / "artifacts/manifest.json")
     captured = manifest.get("tasks", {}).get(task, {})
@@ -271,5 +287,5 @@ def assemble():
 if __name__ == "__main__":
     action, *args = sys.argv[1:]
     actions = {"plan": plan, "download": download, "summarize": summarize, "review": review,
-               "verify": verify, "validate-pilot": validate_pilot, "assemble": assemble}
+               "record-model": record_model, "verify": verify, "validate-pilot": validate_pilot, "assemble": assemble}
     actions[action](*args)

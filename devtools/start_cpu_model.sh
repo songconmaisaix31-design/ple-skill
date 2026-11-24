@@ -5,6 +5,11 @@ set -euo pipefail
 profile=${1:?usage: start_cpu_model.sh gemma26|granite}
 state=${PLE_CPU_STATE:?set PLE_CPU_STATE to a scratch directory}
 port=${PLE_CPU_PORT:-4102}
+context=${PLE_CPU_CONTEXT_SIZE:-8192}
+case "$context" in
+  8192|16384) ;;
+  *) echo 'PLE_CPU_CONTEXT_SIZE must be 8192 or 16384.' >&2; exit 1 ;;
+esac
 : "${MODEL_PROXY_KEY:?set the local model server key}"
 umask 077
 mkdir -p "$state/bin"
@@ -96,14 +101,15 @@ env -u HF_TOKEN -u HUGGING_FACE_HUB_TOKEN -u HF_OIDC_RESOURCE -u HF_OIDC_ID_TOKE
   -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u MODEL_PROXY_KEY \
   nohup "$server" --model "$model" --alias "$model_name" --host 0.0.0.0 --port "$port" \
     --jinja --offline --no-webui --reasoning off --api-key-file "$key_file" \
-    --ctx-size 8192 --parallel 1 --threads "$threads" --threads-batch "$threads" \
+    --ctx-size "$context" --parallel 1 --threads "$threads" --threads-batch "$threads" \
     "${sampling[@]}" --gpu-layers 0 --cache-ram 0 --timeout 600 --log-disable \
     </dev/null >"$state/server.log" 2>&1 &
 pid=$!
 printf '%s\n' "$pid" > "$state/server.pid"
 for ((attempt=0; attempt<120; attempt++)); do
   if curl --max-time 2 --fail --silent "http://127.0.0.1:$port/health" >/dev/null; then
-    printf 'PLE_CPU_MODEL_NAME=%s\nPLE_CPU_MODEL_API=%s\n' "$model_name" "$model_api" > "$state/model.env"
+    printf 'PLE_CPU_MODEL_NAME=%s\nPLE_CPU_MODEL_API=%s\nPLE_CPU_LOADED_CONTEXT=%s\nPLE_CPU_THREADS=%s\n' \
+      "$model_name" "$model_api" "$context" "$threads" > "$state/model.env"
     printf '%s model loaded with llama.cpp %s on %s CPU threads.\n' "$model_name" "$build" "$threads"
     exit 0
   fi

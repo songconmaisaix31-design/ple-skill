@@ -7,7 +7,7 @@ import json
 import re
 import statistics
 import zipfile
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import matplotlib
@@ -89,7 +89,7 @@ def score_vs_cost(out, observations, records):
     fig, (a, b) = plt.subplots(1, 2, figsize=(12, 6.1))
     fig.subplots_adjust(left=.08, right=.96, top=.77, bottom=.24, wspace=.35)
     fig.text(.055, .92, "File score and model usage", size=24, weight="bold")
-    fig.text(.056, .86, "Compute is reported input plus output tokens; cached input is included once.", size=12.5, color=MUTED)
+    fig.text(.056, .86, "Usage counts reported input and output tokens, including cached input once.", size=12.5, color=MUTED)
     for ax in (a, b):
         ax.spines[["top", "right"]].set_visible(False)
         ax.set_ylim(-.10, 1.07)
@@ -97,12 +97,19 @@ def score_vs_cost(out, observations, records):
         ax.grid(axis="y", alpha=.20)
         ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v/1000:g}k" if v else "0"))
         ax.set_xlabel("Reported tokens", labelpad=6)
-    a.set_title("Public PLE dev tasks", loc="left", size=14, weight="bold")
+    a.set_title("Public PLE dev runs", loc="left", size=14, weight="bold")
     a.set_ylabel("Official task score")
     valid = [r for r in observations if r["score"] is not None and r["input_tokens"] is not None and r["output_tokens"] is not None]
     if valid:
-        for r in valid:
-            a.scatter(r["input_tokens"] + r["output_tokens"], r["score"], color=TEAL, s=70)
+        reported = [r["input_tokens"] + r["output_tokens"] for r in valid]
+        a.scatter(reported, [r["score"] for r in valid], color=TEAL, s=70)
+        a.set_xlim(0, max(max(reported) * 1.13, 1))
+        a.xaxis.set_major_locator(MaxNLocator(nbins=5, integer=True))
+        a.text(.03, .93, f"Usage available for {len(valid)} of {len(observations)} runs",
+               transform=a.transAxes, color=MUTED, size=10)
+        if len(valid) == 1:
+            a.annotate(f"{reported[0]:,} tokens", (reported[0], valid[0]["score"]),
+                       xytext=(-5, 10), textcoords="offset points", ha="right", color=TEAL, size=10)
     else:
         a.set_xticks([])
         a.text(.5, .57, "No run has both an official\nscore and recorded token usage.",
@@ -128,15 +135,36 @@ def score_vs_cost(out, observations, records):
 
 def outcomes(out, data):
     obs, n = data["observations"], data["n_public_tasks"]
-    if len(set(r["task"] for r in obs)) != len(obs) or len(obs) > n:
-        raise ValueError("Supply one reference observation per distinct public task")
-    counted = Counter(r["outcome"] for r in obs)
-    counted["No run recorded"] = n - len(obs)
+    by_task = defaultdict(list)
+    run_keys = set()
+    for row in obs:
+        key = (row["task"], row["run_id"], row.get("run_attempt", 1))
+        if key in run_keys:
+            raise ValueError(f"Duplicate task run {key}")
+        run_keys.add(key)
+        by_task[row["task"]].append(row)
+    if len(by_task) > n:
+        raise ValueError("Distinct task count exceeds the public split")
+    counted = Counter()
+    for trials in by_task.values():
+        scored = [row for row in trials if row["score"] is not None]
+        if not scored:
+            category = "Run without a recorded score"
+        elif all(row["score"] == 0 for row in scored):
+            empty_seen = any(row.get("capture_files") == 0 for row in scored)
+            category = "Zero score, empty capture observed" if empty_seen else "Zero score"
+        elif all(row["score"] > 0 for row in scored):
+            category = "Positive score"
+        else:
+            category = "Both positive and zero scores"
+        counted[category] += 1
+    counted["No run recorded"] = n - len(by_task)
     ordered = sorted(counted, key=lambda k: -counted[k])
     fig, ax = plt.subplots(figsize=(10, 5.4))
-    fig.subplots_adjust(left=.32, right=.92, top=.71, bottom=.24)
+    fig.subplots_adjust(left=.37, right=.91, top=.71, bottom=.24)
     fig.text(.06, .9, "Coverage of the 29 public dev tasks", size=24, weight="bold")
-    fig.text(.06, .82, data["model"], size=12.5, color=MUTED)
+    fig.text(.06, .82, f"{data['model']}  ·  {len(obs)} runs across {len(by_task)} of {n} tasks",
+             size=12.5, color=MUTED)
     for j, key in enumerate(ordered):
         color = "#bfc6c4" if key == "No run recorded" else (RUST if "zero" in key.lower() else TEAL)
         ax.barh(j, counted[key], height=.42, color=color)
@@ -147,7 +175,7 @@ def outcomes(out, data):
     ax.spines[["top","left","right"]].set_visible(False)
     ax.tick_params(axis="y", length=0, pad=8)
     ax.grid(axis="x", alpha=.13)
-    fig.text(.06, .06, "A recorded zero and a task without a measurement have different evidentiary status.", size=11, color=MUTED)
+    fig.text(.06, .06, "Each task counts once. A repeated run can clarify a failure without increasing coverage.", size=11, color=MUTED)
     fig.savefig(out / "dev-failures.png", dpi=160)
     plt.close(fig)
 
