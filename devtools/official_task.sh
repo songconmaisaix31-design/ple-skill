@@ -20,7 +20,9 @@ run_status=0
 timeout -k 90s -s INT 260m "$python" eval/run.py "$entry" --tasks "$TASK" --tasks-dir "$tasks" --trials 1 --attempts 1 --no-export \
   --out "$RUNNER_TEMP/run" >"$RUNNER_TEMP/run.log" 2>&1 || run_status=$?
 "$python" "$helper" summarize "$TASK" run "$run_status"
+"$python" "$GITHUB_WORKSPACE/devtools/official_target.py" "$TASK" capture
 "$python" "$GITHUB_WORKSPACE/devtools/official_public_export.py" "$TASK"
+"$python" "$GITHUB_WORKSPACE/devtools/official_target.py" "$TASK" export
 "$python" -m kit artifacts "$entry" --json >"$RUNNER_TEMP/review.json" || true
 "$python" "$helper" review "$TASK"
 tar -C "$entry" -czf "$evidence/export.tar.gz" artifacts

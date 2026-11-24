@@ -259,7 +259,7 @@ async def check_repair_routing():
     async def check():
         return "PASS", ""
 
-    harness = SimpleNamespace(model=SimpleNamespace(chat=chat), steps=0,
+    harness = SimpleNamespace(_chat=chat, steps=0,
                               _do=execute, _check_deliverable=check)
     with patch.dict("os.environ", {"PLE_REPAIR_CONTEXT": "source"}):
         observation = await code_action.first_action(

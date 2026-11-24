@@ -48,7 +48,8 @@ def identity():
     frozen_paths = [".github/workflows/ple-official-export.yml", ".github/actions/official-task",
                     "devtools/official_entry.sh", "devtools/official_model.sh", "devtools/official_export.py",
                     "devtools/official_task.sh", "devtools/official_public_export.py", "devtools/start_cpu_model.sh", "devtools/cloud_model_probe.py",
-                    "devtools/official-kit-requirements.txt", "devtools/official_trial_diagnostic.py"]
+                    "devtools/official-kit-requirements.txt", "devtools/official_trial_diagnostic.py",
+                    "devtools/official_target.py", "devtools/pack_verified_entry.py"]
     tree = subprocess.check_output(["git", "-C", os.environ["GITHUB_WORKSPACE"],
                                     "ls-tree", "-r", os.environ["GITHUB_SHA"], "--", *frozen_paths])
     return {
@@ -129,9 +130,34 @@ def record_model(context, threads):
         write("input.json", record)
 
 
+def harness_stage(console):
+    # Only the harness container emits these cumulative records. The relay
+    # console can also contain restricted commands, filenames and model text.
+    counters = {"model_requests", "model_responses", "tool_calls_returned", "exec_started",
+                "exec_succeeded", "write_started", "write_succeeded"}
+    fields = counters | {"final", "guard", "contract_target"}
+    for line in reversed(console.splitlines()):
+        if not line.startswith("ple-stage-v1 ") or len(line) > 1024:
+            continue
+        try:
+            row = json.loads(line.removeprefix("ple-stage-v1 "))
+        except (ValueError, RecursionError):
+            continue
+        if (isinstance(row, dict) and row.keys() == fields and type(row["final"]) is bool
+                and row["guard"] in ("PASS", "WARN", "FAIL", "ERROR", "SKIP", "unchecked")
+                and row["contract_target"] in ("unknown", "present", "missing_or_wrong_type")
+                and all(type(row[k]) is int and 0 <= row[k] < 2**31 for k in counters)
+                and row["model_responses"] <= row["model_requests"]
+                and row["exec_succeeded"] <= row["exec_started"]
+                and row["write_succeeded"] <= row["write_started"]):
+            return {"available": True, **row}
+    return {"available": False}
+
+
 def summarize(task, phase, exit_code):
-    result = TEMP / phase / "results.json"
-    data = obj(result) if result.is_file() else {}
+    from official_trial_diagnostic import EXCEPTIONS, number, obj as safe_json, tail
+    run_dir = TEMP / phase
+    data = safe_json(run_dir / "results.json")
     rows = [row for row in data.get("tasks", []) if row.get("id") == task]
     row = rows[0] if len(rows) == 1 and data.get("model") == MODEL else {}
     timed_out = int(exit_code) in (124, 137)
@@ -154,10 +180,23 @@ def summarize(task, phase, exit_code):
                    "diagnostics": [name for name, marker in markers.items() if marker in text]}
     observation["runner_cutoff"] = timed_out
     observation["phase_wall_limit_minutes"] = 260 if phase == "run" else 60
-    from official_trial_diagnostic import EXCEPTIONS, number, obj as safe_json, tail
     observation["tokens"] = {k: number((row.get("tokens") or {}).get(k)) for k in ("input", "output", "cache")}
-    run_dir = TEMP / phase
     trial = (run_dir / (row.get("trial") or ".")).resolve()
+    if phase == "run":
+        observation["harness_stage"] = {"available": False}
+        # A wall cutoff can precede results.json. Accept only an unambiguous,
+        # host-recorded task assignment from this single-trial generation job.
+        if timed_out and task in TASKS and (not data or (row and not row.get("trial"))):
+            candidates = []
+            for config in run_dir.glob("attempt1/jobs/dev/*/config.json"):
+                if config.resolve() != config:
+                    continue
+                assignment = safe_json(config).get("task")
+                path = assignment.get("path") if isinstance(assignment, dict) else None
+                if isinstance(path, str) and Path(path).name == task:
+                    candidates.append(config.parent)
+            if len(candidates) == 1:
+                trial = candidates[0]
     if trial != run_dir.resolve() and trial.is_relative_to(run_dir.resolve()):
         capture = safe_json(trial / "deliverables/capture.json")
         result = safe_json(trial / "result.json")
@@ -165,9 +204,13 @@ def summarize(task, phase, exit_code):
         observation.update(trial_result_present=bool(result), capture_present=bool(capture),
                            capture_error=bool(capture.get("error")), captured_file_count=len(capture.get("files", {})),
                            exception=exc if exc in EXCEPTIONS else ("other" if exc else None))
-        logs = "\n".join([text, str((result.get("exception_info") or {}).get("exception_message") or ""),
-                          *(tail(trial / "agent" / name) for name in ("serve.log", "skillguard-harness.txt", "egress.log"))])
+        console = tail(trial / "agent/serve.log")
+        if phase == "run":
+            observation["harness_stage"] = harness_stage(console)
+        logs = "\n".join([text, console, str((result.get("exception_info") or {}).get("exception_message") or ""),
+                          *(tail(trial / "agent" / name) for name in ("skillguard-harness.txt", "egress.log"))])
         patterns = {"trimmed_recent": r"trimmed recent tool observations", "masked_history": r"masked historical tool observations", "context_limit": r"context.length.exceeded|context.window.exceed|prompt is too long|exceeds the available context|maximum context length",
+                    "context_recovery_started": r"(?m)^harness: starting fresh history after a context rejection$",
                     "model_call_failed": r"model call failed after retries", "http_4xx": r"\bhttp (?:400|401|403|404|413|429)\b",
                     "export_empty": r"no dev task.*has usable artifacts"}
         observation["diagnostics"] += [k for k, v in patterns.items() if re.search(v, logs, re.I)]
@@ -207,6 +250,9 @@ def verify(task):
             "archive_sha256": sha256(EVIDENCE / "export.tar.gz"),
             "harbor_environment_sha256": sha256(EVIDENCE / "harbor-environment.txt"),
             "kit_environment_sha256": sha256(EVIDENCE / "kit-environment.txt")}
+    if task == PILOT:
+        from official_target import verified_target
+        data["target"] = verified_target(EVIDENCE / "target.json")
     write("verified.json", data)
 
 

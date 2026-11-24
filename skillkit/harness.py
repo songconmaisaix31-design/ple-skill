@@ -12,7 +12,7 @@ import os
 import posixpath
 import re
 
-from . import code_action, specgen, router
+from . import code_action, context_recovery, specgen, router
 from .guard import Guard
 from .mcp import declared_output_path, exact_copy_contract, exact_tool_text, named_output_paths, result_excerpt
 from .model import MCP_OUTPUT_TOOLS, PYTHON_SOURCE_MAX, PYTHON_TIMEOUT_DEFAULT, PYTHON_TIMEOUT_MAX
@@ -136,6 +136,10 @@ class Harness:
         self._checkpoint_due = False
         self._first_exec_check = False
         self._mutation_interrupted = False
+        self._stage_counts = dict.fromkeys((
+            "model_requests", "model_responses", "tool_calls_returned", "exec_started",
+            "exec_succeeded", "write_started", "write_succeeded",
+        ), 0)
         self._ctx = router.load_context(self.route["domain"])
         self._mcp_outputs = named_output_paths(instruction, self.workdir) if self.mcp else set()
         self._mcp_copy = exact_copy_contract(instruction, self.workdir, self.mcp, self._mcp_outputs)
@@ -259,17 +263,56 @@ class Harness:
         return out
 
     # ---------- tools ----------
+    def _log_stage(self, final=False):
+        status, report = self._guard_result or ("unchecked", "")
+        path = self.spec.get("deliverable")
+        target = "unknown"
+        required = self.spec.get("required_files") or []
+        checks_target = path and (not required or path in required or self.spec.get("mode") == "dir"
+                                  or path.endswith("/"))
+        if checks_target and status in {"PASS", "WARN"}:
+            target = "present"
+        elif path and status == "FAIL":
+            lines = report.splitlines()
+            if any("  FAIL  " + reason + path in lines for reason in
+                   ("交付文件不存在：", "交付目录不存在：")):
+                target = "missing_or_wrong_type"
+            elif "  FAIL  交付文件是 0 字节：" + path in lines or any(
+                    line.startswith(("  PASS  " + path + ": ", "  FAIL  " + path + ": "))
+                    for line in lines):
+                target = "present"
+        # The container console is separate from task commands, model text and
+        # protocol logs. Never include a path, raw tool name or free-form result.
+        print("ple-stage-v1 " + json.dumps({**self._stage_counts, "final": final,
+              "guard": status if status in {"PASS", "WARN", "FAIL", "ERROR", "SKIP"} else "unchecked",
+              "contract_target": target}, separators=(",", ":")), flush=True)
+
+    async def _chat(self, *args, **kwargs):
+        self._stage_counts["model_requests"] += 1
+        self._log_stage()
+        response = await self.model.chat(*args, **kwargs)
+        self._stage_counts["model_responses"] += 1
+        self._stage_counts["tool_calls_returned"] += len(response.get("tool_calls") or [])
+        return response
+
     def _invalidate_checkpoint(self):
         self._guard_result = None
         self.final = ""
 
-    async def _mutate(self, action, *args):
+    async def _mutate(self, action, *args, counter=None):
         self._invalidate_checkpoint()
+        if counter:
+            self._stage_counts[counter + "_started"] += 1
+            self._log_stage()
         try:
-            return await action(*args)
+            result = await action(*args)
         except asyncio.CancelledError:
             self._mutation_interrupted = True
             raise
+        if counter and result.get("ok") is True:
+            if counter != "exec" or (result.get("exit_code") == 0 and not result.get("timed_out")):
+                self._stage_counts[counter + "_succeeded"] += 1
+        return result
 
     def _record_write(self, path):
         self._since_guard = 0
@@ -337,7 +380,7 @@ class Harness:
                 self._invalidate_checkpoint()
                 return "MCP returned conflicting values. Automatic copy disabled. Resolve which result the task requires."
             self._mcp_copy_value = data
-        result = await self._mutate(self.t.write_file, path, data)
+        result = await self._mutate(self.t.write_file, path, data, counter="write")
         if not result.get("ok"):
             return f"MCP exact copy could not be saved to {path}."
         self._record_write(path)
@@ -351,7 +394,7 @@ class Harness:
         _, _, path = self._mcp_copy
         if await self.t.read_file(path) == self._mcp_copy_value:
             return ""
-        await self._mutate(self.t.write_file, path, self._mcp_copy_value)
+        await self._mutate(self.t.write_file, path, self._mcp_copy_value, counter="write")
         if await self.t.read_file(path) == self._mcp_copy_value:
             return ""
         return f"Could not verify the exact tool result in {path}."
@@ -374,7 +417,7 @@ class Harness:
                 return "[run_python] no file saved: stdout is not valid JSON"
 
         data = output.encode()
-        result = await self._mutate(self.t.write_file, path, data)
+        result = await self._mutate(self.t.write_file, path, data, counter="write")
         if not result.get("ok"):
             return f"[run_python] write failed: {result.get('error', 'unknown error')}"
         self._record_write(path)
@@ -410,7 +453,7 @@ class Harness:
                 command = f"{quote_path(self.t.python_cmd)} -c {quote_path(program)}"
             else:
                 command, timeout = a.get("command", ""), a.get("timeout_sec", 120)
-            r = await self._mutate(self.t.exec, command, timeout)
+            r = await self._mutate(self.t.exec, command, timeout, counter="exec")
             if on_execution:
                 on_execution(r)
             if output_path is not None:
@@ -443,7 +486,7 @@ class Harness:
                 target = posixpath.normpath(posixpath.join(self.workdir, path))
                 if target == self._mcp_copy[2] and (blob != self._mcp_copy_value or a.get("append")):
                     return "The file is managed by the exact MCP copy. Call finish without rewriting it."
-            r = await self._mutate(self.t.write_file, path, blob, a.get("append", False))
+            r = await self._mutate(self.t.write_file, path, blob, a.get("append", False), counter="write")
             if r.get("ok") is False:
                 return "[write_file] failed: " + str(r.get("error"))
             self._record_write(path)
@@ -531,6 +574,8 @@ class Harness:
                 pass
             return "The task reached its time budget.\n" + (
                 self.final or "The deliverable could not be verified before the deadline.")
+        finally:
+            self._log_stage(final=True)
 
     async def _run(self, on_usage, on_log, wrap_at, clock, work_deadline):
         snapshot = await self._snapshot()
@@ -576,6 +621,7 @@ class Harness:
                 messages.append({"role": "user", "content": observation})
 
         asked = 0
+        can_recover_context = os.environ.get("PLE_RECOVER_CONTEXT_ONCE") == "1"
         while self.steps < MAX_STEPS:
             if wrap_at is not None and clock() >= wrap_at:
                 messages.append({"role": "user", "content":
@@ -593,13 +639,19 @@ class Harness:
                     on_log("masked historical tool observations")
             try:
                 if self.mcp:
-                    resp = await self.model.chat(request_messages, system, tools=MCP_OUTPUT_TOOLS)
+                    resp = await self._chat(request_messages, system, tools=MCP_OUTPUT_TOOLS)
                 else:
-                    resp = await self.model.chat(request_messages, system)
+                    resp = await self._chat(request_messages, system)
             except Exception as e:
                 if self.steps == 0:
                     raise
                 on_log(f"model error: {e}")
+                if can_recover_context and context_recovery.is_context_rejection(e):
+                    can_recover_context = False
+                    messages = context_recovery.fresh_messages(self.instruction)
+                    asked = 0
+                    on_log("starting fresh history after a context rejection")
+                    continue
                 break
             self.steps += 1
             if on_usage:

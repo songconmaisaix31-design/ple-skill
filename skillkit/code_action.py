@@ -122,7 +122,7 @@ async def first_action(harness, mode, messages, on_usage, on_log, work_deadline,
     try:
         try:
             async with asyncio.timeout(model_budget):
-                response = await harness.model.chat(
+                response = await harness._chat(
                     messages, OBJECTIVE + FORMAT[mode],
                     tools=[PYTHON_TOOL] if mode == "native" else [],
                     max_tokens=TOKEN_BUDGET, tool_choice="required" if mode == "native" else None,

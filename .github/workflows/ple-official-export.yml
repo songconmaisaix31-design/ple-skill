@@ -113,8 +113,7 @@ jobs:
           "$python" -m kit check "$entry" --cancel-test --work "$RUNNER_TEMP/ple-check"
           "$python" -c 'import json,sys; sys.exit(json.load(open(sys.argv[1]))["ready"] is not True)' "$RUNNER_TEMP/ple-check/check.json"
           cp "$RUNNER_TEMP/ple-check/check.json" "$RUNNER_TEMP/evidence/kit-check.json"
-          git -C "$entry" archive --format=tar.gz -o "$RUNNER_TEMP/evidence/submission.tar.gz" HEAD
-          sha256sum "$RUNNER_TEMP/evidence/submission.tar.gz" | cut -d' ' -f1 > "$RUNNER_TEMP/evidence/submission.sha256"
+          "$python" "$GITHUB_WORKSPACE/devtools/pack_verified_entry.py" "$entry" "$RUNNER_TEMP/evidence"
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

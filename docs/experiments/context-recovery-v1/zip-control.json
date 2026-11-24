@@ -1,0 +1,17 @@
+{
+  "kit_commit": "8320f0402fdca9f42476607f72bcfd5271cd50c9",
+  "missing": {
+    "captured_files": 0,
+    "guard": "FAIL",
+    "target_captured": false
+  },
+  "model": "scripted",
+  "positive": {
+    "bytes": 145,
+    "captured_files": 1,
+    "contents_verified": true,
+    "guard": "PASS",
+    "sha256": "b132d9f23eae598dff0d38a6b9c7e58300eee15eb3d0fcebe77458faa52e12fb",
+    "target_captured": true
+  }
+}
