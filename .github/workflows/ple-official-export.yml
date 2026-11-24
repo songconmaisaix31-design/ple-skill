@@ -24,13 +24,20 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - id: trigger
+        env:
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          if [[ "$MESSAGE" == 'Probe hosted PLE Gemma' ]]; then echo 'exact=true' >> "$GITHUB_OUTPUT"; fi
+      - if: steps.trigger.outputs.exact == 'true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with: {persist-credentials: false}
       - name: Verify one hosted Gemma tool call
+        if: steps.trigger.outputs.exact == 'true'
         env:
           PLE_GEMINI_API_KEY: ${{ secrets.PLE_GEMINI_API_KEY }}
         run: python3 devtools/google_gemma_probe.py > "$RUNNER_TEMP/hosted-gemma-probe.json"
-      - if: always()
+      - if: always() && steps.trigger.outputs.exact == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: hosted-gemma-probe-attempt-${{ github.run_attempt }}
