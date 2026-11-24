@@ -88,7 +88,7 @@ def diagnostic_records(repo):
 def score_vs_cost(out, observations, records):
     fig, (a, b) = plt.subplots(1, 2, figsize=(12, 6.1))
     fig.subplots_adjust(left=.08, right=.96, top=.77, bottom=.24, wspace=.35)
-    fig.text(.055, .92, "File score and model usage", size=24, weight="bold")
+    fig.text(.055, .92, "Score and reported token use", size=24, weight="bold")
     fig.text(.056, .86, "Usage counts reported input and output tokens, including cached input once.", size=12.5, color=MUTED)
     for ax in (a, b):
         ax.spines[["top", "right"]].set_visible(False)
@@ -96,26 +96,29 @@ def score_vs_cost(out, observations, records):
         ax.set_yticks([0, .25, .5, .75, 1])
         ax.grid(axis="y", alpha=.20)
         ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v/1000:g}k" if v else "0"))
-        ax.set_xlabel("Reported tokens", labelpad=6)
     a.set_title("Public PLE dev runs", loc="left", size=14, weight="bold")
-    a.set_ylabel("Official task score")
-    valid = [r for r in observations if r["score"] is not None and r["input_tokens"] is not None and r["output_tokens"] is not None]
+    a.set_xlabel("Reported tokens per run", labelpad=6)
+    a.set_ylabel("Official generation score")
+    valid = [(i, r) for i, r in enumerate(observations, start=1)
+             if all(r[k] is not None for k in ("score", "input_tokens", "output_tokens"))]
     if valid:
-        reported = [r["input_tokens"] + r["output_tokens"] for r in valid]
-        a.scatter(reported, [r["score"] for r in valid], color=TEAL, s=70)
+        reported = [r["input_tokens"] + r["output_tokens"] for _, r in valid]
+        a.scatter(reported, [r["score"] for _, r in valid], color=TEAL, s=70)
         a.set_xlim(0, max(max(reported) * 1.13, 1))
         a.xaxis.set_major_locator(MaxNLocator(nbins=5, integer=True))
-        a.text(.03, .93, f"Usage available for {len(valid)} of {len(observations)} runs",
+        tasks = len({r["task"] for r in observations})
+        a.text(.03, .93, f"{tasks} measured task{'s' if tasks != 1 else ''} · usage for {len(valid)} of {len(observations)} runs",
                transform=a.transAxes, color=MUTED, size=10)
-        if len(valid) == 1:
-            a.annotate(f"{reported[0]:,} tokens", (reported[0], valid[0]["score"]),
-                       xytext=(-5, 10), textcoords="offset points", ha="right", color=TEAL, size=10)
+        for total, (index, row) in zip(reported, valid):
+            a.annotate(f"Run {index}", (total, row["score"]), xytext=(0, 10),
+                       textcoords="offset points", ha="center", color=TEAL, size=10)
     else:
         a.set_xticks([])
         a.text(.5, .57, "No run has both an official\nscore and recorded token usage.",
                transform=a.transAxes, ha="center", va="center", color=MUTED, size=13)
     b.set_title("Original repair diagnostics", loc="left", size=14, weight="bold")
     b.set_ylabel("Mean 395-second file score")
+    b.set_xlabel("Mean reported tokens per run", labelpad=6)
     anchors = {"P/Q": "P/Q", "R/S": "R/S", "T/U": "T/U"}
     for i, split in enumerate(PAIRS):
         for arm, marker, color in zip(ARMS, ("o", "s"), (MUTED, TEAL)):

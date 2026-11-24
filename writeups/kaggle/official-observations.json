@@ -93,6 +93,42 @@
         "export_empty"
       ],
       "context": 16384
+    },
+    {
+      "task": "wind-diaphragm-shear",
+      "run_id": "45370943807",
+      "run_attempt": 1,
+      "run_url": "https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45370943807",
+      "commit": "d127279f4c80c27b8bf91311dd652f894bdb45fd",
+      "kit_sha": "8320f0402fdca9f42476607f72bcfd5271cd50c9",
+      "dataset_sha": "b3857a3fea39a695e18f845d4a88f29442e96e75",
+      "seed": 17,
+      "temperature": 0,
+      "score": 0.0,
+      "seconds": 5572,
+      "input_tokens": 556464,
+      "output_tokens": 11881,
+      "cache_read_tokens": 499307,
+      "checks_only": true,
+      "independent_regrade": false,
+      "independent_regrade_score": null,
+      "capture_present": true,
+      "capture_error": false,
+      "capture_files": 0,
+      "file_count": 0,
+      "manifest_present": true,
+      "runner_cutoff": false,
+      "evaluator_exit": 1,
+      "observed_log_markers": [
+        "empty",
+        "refused",
+        "trimmed_recent",
+        "masked_history",
+        "context_limit",
+        "http_4xx",
+        "export_empty"
+      ],
+      "context": 16384
     }
   ]
 }

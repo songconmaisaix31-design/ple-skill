@@ -1,10 +1,12 @@
 # PLE 实验接续记录
 
-## 在途 wind 与已准备的恢复候选
+## 在途：wind 中途上下文恢复
 
-[45370943807，第 1 次](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45370943807/job/138364862309) 已在 `d127279f4c80c27b8bf91311dd652f894bdb45fd` 启动。轮询时复用此作业。原创 ZIP 写入/缺失对照，以及一次结构化上下文拒绝后的恢复对照现均可复现，原始记录和下一次正式试跑的基线、变量、次数、继续门槛见[完整登记](context-recovery-v1/README.md)。
+第五轮已结束。截断最近两条工具结果的策略实际触发，实测 0/1，耗时 5,572 秒，捕获及导出都是 0 个文件。按预登记停止扩大这一策略。已归档[第五轮工件、原始分和基线差值](official-wind-v1/README.md)。
 
-若本次交付合格，优先完成官方复评、材料匹配及既有草稿的一次提交。若本次交付缺失且有上下文拒绝迹象，归档这次的实际结果后，在相同预算单独启用 `PLE_RECOVER_CONTEXT_ONCE=1` 试跑一次；已有在途候选则接续。其他错误按实际失败阶段处理。
+下一候选已在同一正式题启动：[45389312270，第 1 次](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45389312270)，[运行提交 35306a8e](https://github.com/songconmaisaix31-design/ple-skill/commit/35306a8edc3e053a6b67a8e8701ad2caeb168e08)。先接续这次试跑。与第五轮比较，唯一策略变量为遇到明确的中途上下文拒绝时允许从完整任务恢复一次。出错前已写到磁盘的工作可被继续读取；同一任务第二次报错停止。模型、输入、预算和主指标沿用[启动前登记](https://github.com/songconmaisaix31-design/ple-skill/blob/15e0e0bc32922a89c1b181b9196f35b50a79e4e4/docs/experiments/context-recovery-v1/README.md)。
+
+结束后核对实际触发、目标 ZIP 及文件分。取得合格交付优先准备参赛包；判断策略是否进入配对阶段时同时要求实际触发且分数一致。触发但无交付则停止。若仍无 ZIP，先用新增的请求、执行与目标观测记录定位第一个断点，再决定下一变量。云电脑上的模型试跑不依赖本机 WSL 或 Kaggle 登录。
 
 ## 最近两条工具结果的长度上限
 
