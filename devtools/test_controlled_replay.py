@@ -38,10 +38,23 @@ class LiveStub:
                 "usage": {}, "finish_reason": "stop"}
 
 
+class FeedbackStub(LiveStub):
+    def __init__(self, replies):
+        super().__init__()
+        self.replies = list(replies)
+        self.messages_seen = []
+
+    async def chat(self, messages, system, tools=None, **kwargs):
+        self.calls += 1
+        self.last_tools, self.last_kwargs = tools, kwargs
+        self.messages_seen.append(messages)
+        return self.replies.pop(0)
+
+
 def check_executable_patch(source):
     encoded = base64.b64encode(source.encode()).decode()
     wrapper = f"import base64; exec(compile(base64.b64decode('{encoded}'), '<run_python>', 'exec'))"
-    for variant, expected in (("l", 49), ("m", 54)):
+    for variant, expected in (("l", 49), ("m", 54), ("n", 57), ("o", 67)):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary) / "case"
             prepare(workspace, variant)
@@ -136,6 +149,54 @@ async def check_provider():
                 assert rejected_events["patch_application"]["accepted"] is False
                 assert reply["tool_calls"] == tool_calls
                 assert rejected_archive.finish()["complete"] is True
+
+            feedback_archive = runner.ModelIOArchive(Path(temporary) / "feedback.jsonl")
+            invalid_call = {"id": "feedback-1", "name": "replace_line", "arguments": {
+                "line": 81,
+                "replacement": "                        'total_pump_units': sum(c[0] for c in combination),",
+            }}
+            corrected_call = {"id": "feedback-2", "name": "replace_line", "arguments": {
+                "line": 81, "replacement": "'total_pump_units': sum(combination),",
+            }}
+            feedback_live = FeedbackStub([
+                {"content": "", "tool_calls": [invalid_call], "usage": {}, "finish_reason": "tool_calls"},
+                {"content": "", "tool_calls": [corrected_call], "usage": {}, "finish_reason": "tool_calls"},
+            ])
+            feedback_events = {}
+            feedback_model = runner.ControlledNativeFeedbackModel(
+                feedback_live, source, elapsed, feedback_archive, [], feedback_events)
+            await feedback_model.chat([{"role": "user", "content": "frozen"}], "system", tools=[])
+            feedback_archive.request({"model": feedback_live.model, "messages": [], "max_tokens": 96})
+            feedback_reply = await feedback_model.chat(
+                [{"role": "user", "content": "repair"}], "system")
+            assert feedback_reply["tool_calls"][0]["name"] == "run_python"
+            assert feedback_live.calls == 2 and len(feedback_live.messages_seen[1]) == 3
+            tool_result = feedback_live.messages_seen[1][-1]
+            assert tool_result["role"] == "tool" and json.loads(tool_result["content"]) == {
+                "accepted": False, "reason": "leading_or_trailing_whitespace",
+            }
+            assert feedback_events["patch_application"]["accepted"] is True
+            assert feedback_archive.finish()["complete"] is True
+            feedback_records = [json.loads(line) for line in feedback_archive.path.read_text().splitlines()]
+            emitted = [row for row in feedback_records if row.get("event") == "patch_feedback"]
+            assert len(emitted) == 1 and emitted[0]["reason"] == "leading_or_trailing_whitespace"
+            assert set(json.loads(emitted[0]["content"])) == {"accepted", "reason"}
+            assert "sum(" not in emitted[0]["content"] and "total_pump_units" not in emitted[0]["content"]
+
+            direct_archive = runner.ModelIOArchive(Path(temporary) / "feedback-direct.jsonl")
+            direct_live = FeedbackStub([{
+                "content": "", "tool_calls": [corrected_call], "usage": {},
+                "finish_reason": "tool_calls",
+            }])
+            direct_model = runner.ControlledNativeFeedbackModel(
+                direct_live, source, elapsed, direct_archive, [], {})
+            await direct_model.chat([{"role": "user", "content": "frozen"}], "system", tools=[])
+            direct_archive.request({"model": direct_live.model, "messages": [], "max_tokens": 96})
+            direct_reply = await direct_model.chat([{"role": "user", "content": "repair"}], "system")
+            assert direct_reply["tool_calls"][0]["name"] == "run_python" and direct_live.calls == 1
+            assert not any(json.loads(line).get("event") == "patch_feedback"
+                           for line in direct_archive.path.read_text().splitlines())
+            assert direct_archive.finish()["complete"] is True
         finally:
             runner.CONTROLLED_RELEASE_SEC = old_release
 
@@ -185,7 +246,7 @@ def main():
     )
     for raw in invalid:
         transformed, rejected = runner.apply_constrained_patch(source, raw)
-        assert transformed is None and rejected["accepted"] is False
+        assert transformed is None and rejected["accepted"] is False and rejected["rejection_reason"]
     asyncio.run(check_repair_routing())
     asyncio.run(check_provider())
     print("controlled replay provider, source excerpt, patch guard and delegation verified")

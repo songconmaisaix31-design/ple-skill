@@ -182,6 +182,46 @@ jobs:
               raise SystemExit("constrained-patch-v1/attempts.json differs from replay")
           PYCONSTRAINED
 
+          native=docs/experiments/native-patch-v1
+          native_replay="$RUNNER_TEMP/native-patch-v1"
+          mkdir -p "$native_replay"
+          python3 devtools/build_native_patch_evidence.py \
+            --protocol "$native/protocol.json" \
+            --job l:1:"$native/attempts/run-45278770683-l1-attempt-1.zip" \
+            --job l:2:"$native/attempts/run-45278770683-l2-attempt-1.zip" \
+            --job l:3:"$native/attempts/run-45278770683-l3-attempt-2.zip" \
+            --job m:1:"$native/attempts/run-45278770683-m1-attempt-1.zip" \
+            --job m:2:"$native/attempts/run-45278770683-m2-attempt-1.zip" \
+            --job m:3:"$native/attempts/run-45278770683-m3-attempt-1.zip" \
+            --output "$native_replay/evidence.zip" \
+            --audit "$native_replay/attempts.json"
+          cmp "$native/evidence.zip" "$native_replay/evidence.zip"
+          python3 devtools/verify_native_patch_evidence.py \
+            --archive "$native_replay/evidence.zip" \
+            --protocol "$native/protocol.json" \
+            --settings-protocol docs/experiments/repair-source-v1/protocol.json \
+            --csv "$native_replay/trials.csv" \
+            --details "$native_replay/code-coverage.json"
+          python3 devtools/native_patch_report.py "$native_replay/trials.csv" \
+            --output "$native_replay/summary.json"
+          python3 - "$native" "$native_replay" <<'PYNATIVE'
+          import csv
+          import json
+          import sys
+          from pathlib import Path
+
+          saved, replay = map(Path, sys.argv[1:])
+          with (saved / "trials.csv").open(newline="") as a, (replay / "trials.csv").open(newline="") as b:
+              archived, rebuilt = csv.DictReader(a), csv.DictReader(b)
+              if archived.fieldnames != rebuilt.fieldnames or list(archived) != list(rebuilt):
+                  raise SystemExit("native-patch-v1/trials.csv differs from replay")
+          for name in ("summary.json", "code-coverage.json"):
+              if json.loads((saved / name).read_bytes()) != json.loads((replay / name).read_bytes()):
+                  raise SystemExit(f"native-patch-v1/{name} differs from replay")
+          if json.loads((saved / "attempts/attempts.json").read_bytes()) != json.loads((replay / "attempts.json").read_bytes()):
+              raise SystemExit("native-patch-v1/attempts.json differs from replay")
+          PYNATIVE
+
       - name: Exchange the authorized runner identity for a temporary Hugging Face token
         if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' }}
         shell: bash

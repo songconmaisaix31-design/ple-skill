@@ -1,0 +1,18 @@
+{
+  "attempts": [
+    {
+      "run_id": 45278770683,
+      "run_attempt": 1,
+      "job_id": 138057378331,
+      "case": "l",
+      "repeat": 3,
+      "status": "cancelled",
+      "started_at_utc": "2026-11-23T22:20:47Z",
+      "completed_at_utc": "2026-11-23T23:10:58Z",
+      "reason": "The paired step completed, but the 50-minute job limit cancelled the job during artifact upload. No artifact was published, so the attempt is a technical missing pair and is excluded from scores.",
+      "artifact": null,
+      "replacement_job_id": 138084718355,
+      "replacement_run_attempt": 2
+    }
+  ]
+}
