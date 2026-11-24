@@ -1,0 +1,155 @@
+{
+  "cases": [
+    "n",
+    "o"
+  ],
+  "seed": 17,
+  "release_sec": 250,
+  "snapshot_sec": 395,
+  "complete": true,
+  "counts_by_arm": {
+    "native-patch": {
+      "planned": 6,
+      "measured": 6,
+      "repair_requests": 6,
+      "source_exposures": 6,
+      "timing_valid": 6,
+      "first_repair_responses_completed": 6,
+      "native_patch_interface_uses": 6,
+      "request_shapes_valid": 6,
+      "patch_attempts": 58,
+      "accepted_patches": 0,
+      "tool_responses": 58,
+      "native_tool_responses": 58,
+      "native_argument_schema_valid": 58,
+      "native_unindented_replacements": 0,
+      "feedback_exposures": 0,
+      "feedback_events": 0,
+      "feedback_requests": 0,
+      "feedback_payloads_valid": 0,
+      "feedback_retry_responses_completed": 0,
+      "repeated_retry_responses": 0,
+      "nonempty_text_responses": 0
+    },
+    "native-feedback": {
+      "planned": 6,
+      "measured": 6,
+      "repair_requests": 6,
+      "source_exposures": 6,
+      "timing_valid": 6,
+      "first_repair_responses_completed": 6,
+      "native_patch_interface_uses": 6,
+      "request_shapes_valid": 6,
+      "patch_attempts": 65,
+      "accepted_patches": 0,
+      "tool_responses": 65,
+      "native_tool_responses": 65,
+      "native_argument_schema_valid": 65,
+      "native_unindented_replacements": 0,
+      "feedback_exposures": 6,
+      "feedback_events": 34,
+      "feedback_requests": 34,
+      "feedback_payloads_valid": 34,
+      "feedback_retry_responses_completed": 31,
+      "repeated_retry_responses": 31,
+      "nonempty_text_responses": 0
+    }
+  },
+  "paired_results_by_case": {
+    "n": {
+      "pairs": [
+        {
+          "repeat": 1,
+          "native-patch": 0.0,
+          "native-feedback": 0.0,
+          "native_feedback_minus_native_patch": 0.0
+        },
+        {
+          "repeat": 2,
+          "native-patch": 0.0,
+          "native-feedback": 0.0,
+          "native_feedback_minus_native_patch": 0.0
+        },
+        {
+          "repeat": 3,
+          "native-patch": 0.0,
+          "native-feedback": 0.0,
+          "native_feedback_minus_native_patch": 0.0
+        }
+      ],
+      "mean_paired_difference": 0.0,
+      "wins": 0,
+      "ties": 3,
+      "losses": 0
+    },
+    "o": {
+      "pairs": [
+        {
+          "repeat": 1,
+          "native-patch": 0.0,
+          "native-feedback": 0.0,
+          "native_feedback_minus_native_patch": 0.0
+        },
+        {
+          "repeat": 2,
+          "native-patch": 0.0,
+          "native-feedback": 0.0,
+          "native_feedback_minus_native_patch": 0.0
+        },
+        {
+          "repeat": 3,
+          "native-patch": 0.0,
+          "native-feedback": 0.0,
+          "native_feedback_minus_native_patch": 0.0
+        }
+      ],
+      "mean_paired_difference": 0.0,
+      "wins": 0,
+      "ties": 3,
+      "losses": 0
+    }
+  },
+  "case_macro_score_by_repeat": [
+    {
+      "repeat": 1,
+      "native-patch": 0.0,
+      "native-feedback": 0.0,
+      "native_feedback_minus_native_patch": 0.0
+    },
+    {
+      "repeat": 2,
+      "native-patch": 0.0,
+      "native-feedback": 0.0,
+      "native_feedback_minus_native_patch": 0.0
+    },
+    {
+      "repeat": 3,
+      "native-patch": 0.0,
+      "native-feedback": 0.0,
+      "native_feedback_minus_native_patch": 0.0
+    }
+  ],
+  "across_repeat_statistics": {
+    "native-patch": {
+      "n": 3,
+      "mean": 0.0,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    },
+    "native-feedback": {
+      "n": 3,
+      "mean": 0.0,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    },
+    "native_feedback_minus_native_patch": {
+      "n": 3,
+      "mean": 0.0,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    }
+  },
+  "registered_decision": "stop_candidate_no_gain",
+  "failure_diagnosis": "The candidate received a valid structured rejection after every registered initial rejection. Every completed immediate retry repeated the same indented replacement; three final retries were still in flight at the cutoff. All candidate expressions still indexed integer pump values, and no patch was accepted.",
+  "interpretation": "This controlled diagnostic estimates recovery conditional on one fixed induced failure. It is separate from the official PLE development score."
+}

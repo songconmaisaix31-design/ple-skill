@@ -1,0 +1,21 @@
+{
+  "attempts": [
+    {
+      "run_id": 45303145848,
+      "run_attempt": 1,
+      "job_id": 138140380926,
+      "case": "n",
+      "repeat": 2,
+      "status": "cancelled",
+      "started_at_utc": "2026-11-24T01:11:33Z",
+      "completed_at_utc": "2026-11-24T02:01:49Z",
+      "reason": "The 50-minute job limit cancelled the paired step after the first native-feedback arm had completed. Artifact upload succeeded, but the native-patch arm was absent, so this is a technical missing pair and is excluded from scores.",
+      "artifact_id": 14881754396,
+      "artifact": "run-45303145848-n2-attempt-1.zip",
+      "artifact_sha256": "a2a19d270a6cd6245210cc07e71c5d77ad751f9575457ea6f5b30d3a7d0bf384",
+      "preserved_partial_result": {"arm": "native-feedback", "measured": true, "score": 0.0},
+      "replacement_job_id": 138161535277,
+      "replacement_run_attempt": 2
+    }
+  ]
+}
