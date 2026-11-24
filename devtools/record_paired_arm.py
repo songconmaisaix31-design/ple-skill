@@ -31,9 +31,10 @@ raw, destination = map(Path, sys.argv[1:3])
 arm, position, first_arm, phase, status = sys.argv[3:]
 status = int(status)
 variant = os.environ["VARIANT"]
-controlled_trial = variant in ("h", "i", "j", "k", "l", "m")
-patch_trial = variant in ("j", "k", "l", "m")
-native_patch_trial = variant in ("l", "m")
+controlled_trial = variant in ("h", "i", "j", "k", "l", "m", "n", "o")
+patch_trial = variant in ("j", "k", "l", "m", "n", "o")
+native_patch_trial = variant in ("l", "m", "n", "o")
+native_feedback_trial = variant in ("n", "o")
 key = os.environ["MODEL_PROXY_KEY"].encode()
 inputs = ("case/task.md", "case/input/site.json", "case/input/periods.csv")
 outputs = ("case/output/schedule.csv", "case/output/summary.json")
@@ -72,13 +73,14 @@ grade = (report or {}).get("grade")
 checkpoint = (report or {}).get("checkpoint") or {}
 run_sha = os.environ["GITHUB_SHA"]
 repair_trial = variant in ("f", "g") or controlled_trial
-experiment = ("native-patch-v1" if native_patch_trial else
+experiment = ("native-feedback-v1" if native_feedback_trial else
+              "native-patch-v1" if native_patch_trial else
               "constrained-patch-v1" if patch_trial else
               "controlled-repair-replay-v1" if controlled_trial else
               "repair-source-v1" if repair_trial else "paired-storage-v1")
 protocol_path = f"docs/experiments/{experiment}/protocol.json"
-payload = subprocess.check_output(["git", "show", f"{run_sha}:{protocol_path}"])
-protocol = json.loads(payload)
+protocol_bytes = subprocess.check_output(["git", "show", f"{run_sha}:{protocol_path}"])
+protocol = json.loads(protocol_bytes)
 split = protocol["split"]
 preregistered = protocol["cases"][variant] if controlled_trial else split["cases"][variant]
 expected_inputs = preregistered["input_sha256"] if controlled_trial else preregistered["sha256"]
@@ -95,7 +97,9 @@ timing_valid = None
 patch_interface_used = None
 prompt_patch_interface_used = None
 native_patch_interface_used = None
+native_feedback_exposed = None
 patch_events = []
+feedback_events = []
 io_file = destination / "model-io.jsonl"
 if io_file.is_file() and archive.get("complete") is True and not io_redacted:
     try:
@@ -135,10 +139,35 @@ if io_file.is_file() and archive.get("complete") is True and not io_redacted:
                         and (record["body"]["tools"][0].get("function") or {}).get("name") == "replace_line"
                         and record["body"].get("tool_choice") == "required"
                         for record in repair)
-                    patch_interface_used = (native_patch_interface_used if arm == "native-patch"
+                    patch_interface_used = (native_patch_interface_used
+                                            if arm in ("native-patch", "native-feedback")
                                             else prompt_patch_interface_used)
                     patch_events = [record for record in records
                                     if record.get("event") == "patch_application"]
+                    feedback_events = [record for record in records
+                                       if record.get("event") == "patch_feedback"]
+                    allowed_reasons = {
+                        "invalid_json", "invalid_call_shape", "wrong_line",
+                        "replacement_not_string", "empty_replacement",
+                        "replacement_too_long", "multiline_replacement",
+                        "leading_or_trailing_whitespace", "syntax_invalid",
+                    }
+                    feedback_requests = []
+                    for record in repair:
+                        messages = record.get("body", {}).get("messages", [])
+                        for message in messages:
+                            if message.get("role") != "tool":
+                                continue
+                            try:
+                                tool_result = json.loads(message.get("content", ""))
+                            except (ValueError, TypeError):
+                                continue
+                            if (isinstance(tool_result, dict) and tool_result.get("accepted") is False
+                                    and tool_result.get("reason") in allowed_reasons
+                                    and set(tool_result) == {"accepted", "reason"}):
+                                feedback_requests.append(record)
+                                break
+                    native_feedback_exposed = bool(feedback_requests)
     except (ValueError, TypeError, AttributeError):
         io_complete = False
 observation = (phase == "experiment" and status in (0, 1)
@@ -156,10 +185,16 @@ if controlled_trial:
     if patch_trial:
         expected_first = protocol["design"]["first_arm"][variant][str(os.environ["REPEAT"])]
         if native_patch_trial:
-            interface_valid = ((arm == "patch-source" and prompt_patch_interface_used is True
-                                and native_patch_interface_used is False)
-                               or (arm == "native-patch" and native_patch_interface_used is True
-                                   and prompt_patch_interface_used is False))
+            if native_feedback_trial:
+                interface_valid = (native_patch_interface_used is True
+                                   and prompt_patch_interface_used is False
+                                   and ((arm == "native-feedback" and native_feedback_exposed is True)
+                                        or (arm == "native-patch" and native_feedback_exposed is False)))
+            else:
+                interface_valid = ((arm == "patch-source" and prompt_patch_interface_used is True
+                                    and native_patch_interface_used is False)
+                                   or (arm == "native-patch" and native_patch_interface_used is True
+                                       and prompt_patch_interface_used is False))
             events_valid = bool(patch_events)
         else:
             interface_valid = (patch_interface_used == (arm == "patch-source"))
@@ -174,7 +209,7 @@ metadata = {"variant": variant, "mode": arm, "repeat": int(os.environ["REPEAT"])
             "git_sha": run_sha, "model": "gemma-4-26b",
             "cpu_model": cpu, "logical_cpus": cpus, "model_threads": min(cpus, 4),
             "phase": phase, "exit_code": status, "observation": observation,
-            "protocol_sha256": hashlib.sha256(payload).hexdigest(),
+            "protocol_sha256": hashlib.sha256(protocol_bytes).hexdigest(),
             "input_sha256": checksums, "protocol_input_sha256": expected_inputs,
             "input_matches_protocol": input_matches, "model_io_archive_complete": io_complete}
 if repair_trial:
@@ -187,7 +222,9 @@ if patch_trial:
     metadata.update(patch_interface_used=patch_interface_used,
                     prompt_patch_interface_used=prompt_patch_interface_used,
                     native_patch_interface_used=native_patch_interface_used,
-                    patch_application_events=patch_events)
+                    native_feedback_exposed=native_feedback_exposed,
+                    patch_application_events=patch_events,
+                    patch_feedback_events=feedback_events)
 (destination / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 if report is not None:
     (destination / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

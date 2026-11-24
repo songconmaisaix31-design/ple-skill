@@ -120,6 +120,20 @@ VARIANTS = {
             (4, 1, 2, 12), (5, 3, 4, 4), (6, 2, 6, 7),
         )),
     ),
+    "n": (
+        Site(6, 1, 13, 5, 7, (0, 2, 4, 7)),
+        tuple(Period(*row) for row in (
+            (1, 3, 4, 8), (2, 5, 7, 1), (3, 2, 2, 11),
+            (4, 4, 4, 5), (5, 3, 7, 2), (6, 3, 4, 9),
+        )),
+    ),
+    "o": (
+        Site(5, 0, 12, 4, 6, (0, 1, 4, 6)),
+        tuple(Period(*row) for row in (
+            (1, 2, 4, 10), (2, 5, 6, 2), (3, 4, 6, 7),
+            (4, 1, 1, 12), (5, 3, 4, 3), (6, 3, 6, 6),
+        )),
+    ),
 }
 SCHEDULE_COLUMNS = ("period", "pump_units", "end_storage_units", "period_cost_cents")
 RESULT_FILENAMES = {"schedule.csv", "summary.json"}

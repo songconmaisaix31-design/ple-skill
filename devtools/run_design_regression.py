@@ -253,10 +253,11 @@ def first_code_action(lines):
     return None
 
 
-ARCHIVE_VARIANTS = ("d", "e", "f", "g", "h", "i", "j", "k", "l", "m")
-CONTROLLED_VARIANTS = ("h", "i", "j", "k", "l", "m")
-PATCH_VARIANTS = ("j", "k", "l", "m")
-NATIVE_PATCH_VARIANTS = ("l", "m")
+ARCHIVE_VARIANTS = ("d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o")
+CONTROLLED_VARIANTS = ("h", "i", "j", "k", "l", "m", "n", "o")
+PATCH_VARIANTS = ("j", "k", "l", "m", "n", "o")
+NATIVE_PATCH_VARIANTS = ("l", "m", "n", "o")
+NATIVE_FEEDBACK_VARIANTS = ("n", "o")
 CONTROLLED_RELEASE_SEC = 250
 CONTROLLED_ARCHIVE_SHA256 = "511905b2bc72f17b92abf364eade2e2cfd2b060b86419796197f37968b5204e7"
 CONTROLLED_SOURCE_SHA256 = "eba7247453712a78c991e152dd1e4bf08d80474429601e25ec7ae6fd6fbb7381"
@@ -287,26 +288,48 @@ PATCH_TOOL = {
 def apply_constrained_patch(source, raw):
     """Validate one exact JSON line replacement and return host-transformed source plus evidence."""
     event = {"accepted": False, "line": None, "replacement": None,
+             "rejection_reason": None,
              "raw_content_sha256": (hashlib.sha256(raw.encode()).hexdigest()
                                      if isinstance(raw, str) else None)}
     try:
         patch = json.loads(raw)
-        if (not isinstance(patch, dict) or set(patch) != {"line", "replacement"}
-                or patch["line"] != 81 or not isinstance(patch["replacement"], str)
-                or patch["replacement"] != patch["replacement"].strip()
-                or not patch["replacement"] or len(patch["replacement"]) > 160
-                or "\n" in patch["replacement"] or "\r" in patch["replacement"]):
-            raise ValueError("invalid constrained patch")
+    except (ValueError, TypeError, RecursionError):
+        event["rejection_reason"] = "invalid_json"
+        return None, event
+    if not isinstance(patch, dict) or set(patch) != {"line", "replacement"}:
+        event["rejection_reason"] = "invalid_call_shape"
+        return None, event
+    if patch["line"] != 81:
+        event["rejection_reason"] = "wrong_line"
+        return None, event
+    if not isinstance(patch["replacement"], str):
+        event["rejection_reason"] = "replacement_not_string"
+        return None, event
+    replacement = patch["replacement"]
+    if not replacement:
+        event["rejection_reason"] = "empty_replacement"
+        return None, event
+    if len(replacement) > 160:
+        event["rejection_reason"] = "replacement_too_long"
+        return None, event
+    if "\n" in replacement or "\r" in replacement:
+        event["rejection_reason"] = "multiline_replacement"
+        return None, event
+    if replacement != replacement.strip():
+        event["rejection_reason"] = "leading_or_trailing_whitespace"
+        return None, event
+    try:
         lines = source.splitlines()
         original = lines[patch["line"] - 1]
         indent = original[:len(original) - len(original.lstrip())]
-        lines[patch["line"] - 1] = indent + patch["replacement"]
+        lines[patch["line"] - 1] = indent + replacement
         repaired = "\n".join(lines)
         ast.parse(repaired)
-        event.update(accepted=True, line=patch["line"], replacement=patch["replacement"],
+        event.update(accepted=True, line=patch["line"], replacement=replacement,
                      patched_source_sha256=hashlib.sha256(repaired.encode()).hexdigest())
         return repaired, event
-    except (ValueError, TypeError, KeyError, IndexError, SyntaxError):
+    except (IndexError, SyntaxError):
+        event["rejection_reason"] = "syntax_invalid"
         return None, event
 
 
@@ -558,6 +581,58 @@ class ControlledNativePatchModel(ControlledFirstModel):
         return result
 
 
+class ControlledNativeFeedbackModel(ControlledFirstModel):
+    """Return a bounded host rejection reason to the same native-tool conversation."""
+
+    def guard(self, result, feedback_round):
+        calls = result.get("tool_calls") or []
+        arguments = calls[0].get("arguments") if (len(calls) == 1
+                    and calls[0].get("name") == "replace_line") else None
+        raw = json.dumps(arguments, sort_keys=True, separators=(",", ":")) if isinstance(arguments, dict) else None
+        repaired, event = apply_constrained_patch(self.source, raw)
+        event.update(end_sec=round(self.elapsed(), 3), native_call_count=len(calls),
+                     native_tool=(calls[0].get("name") if len(calls) == 1 else None),
+                     feedback_round=feedback_round)
+        self.archive.write({"event": "patch_application", "call": self.archive.requests, **event})
+        self.first_events["patch_application"] = event
+        if repaired is not None:
+            result = {**result, "content": "", "tool_calls": [{
+                "id": calls[0].get("id") or f"host-native-feedback-{self.archive.requests}",
+                "name": "run_python", "arguments": {"code": repaired},
+            }]}
+        return result, repaired, event
+
+    async def chat(self, messages, system, tools=None, **kwargs):
+        if not self.used:
+            return await super().chat(messages, system, tools=tools, **kwargs)
+        result = await self.live.chat(
+            messages, system, tools=[PATCH_TOOL], tool_choice="required",
+            **{**kwargs, "max_tokens": 96},
+        )
+        result, repaired, event = self.guard(result, 0)
+        calls = result.get("tool_calls") or []
+        if (repaired is not None or len(calls) != 1 or calls[0].get("name") != "replace_line"
+                or not isinstance(calls[0].get("id"), str) or not event.get("rejection_reason")):
+            return result
+
+        feedback = json.dumps({"accepted": False, "reason": event["rejection_reason"]},
+                              sort_keys=True, separators=(",", ":"))
+        feedback_messages = [*messages, {
+            "role": "assistant", "content": result.get("content", ""), "tool_calls": calls,
+        }, {
+            "role": "tool", "tool_call_id": calls[0]["id"], "content": feedback,
+        }]
+        self.archive.write({"event": "patch_feedback", "call": self.archive.requests,
+                            "reason": event["rejection_reason"], "content": feedback,
+                            "end_sec": round(self.elapsed(), 3)})
+        retried = await self.live.chat(
+            feedback_messages, system, tools=[PATCH_TOOL], tool_choice="required",
+            **{**kwargs, "max_tokens": 96},
+        )
+        retried, _, _ = self.guard(retried, 1)
+        return retried
+
+
 @asynccontextmanager
 async def task_container(inputs, fixture_paths):
     name = "ple-design-" + uuid.uuid4().hex
@@ -584,7 +659,7 @@ async def task_container(inputs, fixture_paths):
 
 async def measure(workspace, variant, seconds, kit_root, check_transport=False, checkpoint_sec=None,
                   archive_path=None, controlled_first=False, controlled_patch=False,
-                  controlled_native_patch=False):
+                  controlled_native_patch=False, controlled_native_feedback=False):
     sys.path.insert(0, str(kit_root))
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import websockets
@@ -632,7 +707,8 @@ async def measure(workspace, variant, seconds, kit_root, check_transport=False, 
                     model_attempts, first_events, lambda: time.monotonic() - started, archive))
                 if controlled_first:
                     from skillkit.model import from_env as configured_model
-                    wrapper_class = (ControlledNativePatchModel if controlled_native_patch else
+                    wrapper_class = (ControlledNativeFeedbackModel if controlled_native_feedback else
+                                     ControlledNativePatchModel if controlled_native_patch else
                                      ControlledPatchModel if controlled_patch else ControlledFirstModel)
                     wrapper = wrapper_class(
                         configured_model(), controlled_program(),
@@ -731,6 +807,8 @@ def main():
                         help="Request and guard a one-line JSON patch after the controlled failure")
     parser.add_argument("--controlled-native-patch", action="store_true",
                         help="Require the sole native replace_line tool after the controlled failure")
+    parser.add_argument("--controlled-native-feedback", action="store_true",
+                        help="Return one bounded host rejection reason to the native patch conversation")
     args = parser.parse_args()
     if not 1 <= args.timeout_sec <= 21600:
         parser.error("time budget must be between 1 and 21600 seconds")
@@ -744,14 +822,17 @@ def main():
     if args.checkpoint_only_sec is not None and (args.check_transport or not 0 < args.checkpoint_only_sec < args.timeout_sec):
         parser.error("--checkpoint-only-sec needs a full model run and must be shorter than --timeout-sec")
     if args.controlled_first_program != (args.variant in CONTROLLED_VARIANTS):
-        parser.error("--controlled-first-program is required exactly for H/I/J/K/L/M")
+        parser.error("--controlled-first-program is required exactly for H/I/J/K/L/M/N/O")
     if args.controlled_first_program and (args.archive_model_io is None or args.checkpoint_only_sec != 395):
         parser.error("controlled repair replay requires model IO archival and the frozen 395-second cutoff")
     if args.controlled_patch_repair and args.variant not in PATCH_VARIANTS:
-        parser.error("--controlled-patch-repair is available only for J/K/L/M")
+        parser.error("--controlled-patch-repair is available only for J/K/L/M/N/O")
     if args.controlled_native_patch and args.variant not in NATIVE_PATCH_VARIANTS:
-        parser.error("--controlled-native-patch is available only for L/M")
-    if args.controlled_patch_repair and args.controlled_native_patch:
+        parser.error("--controlled-native-patch is available only for L/M/N/O")
+    if args.controlled_native_feedback and args.variant not in NATIVE_FEEDBACK_VARIANTS:
+        parser.error("--controlled-native-feedback is available only for N/O")
+    if sum((args.controlled_patch_repair, args.controlled_native_patch,
+            args.controlled_native_feedback)) > 1:
         parser.error("choose exactly one controlled patch interface")
     kit = args.kit_root.resolve()
     if not (kit / "kit" / "relay.py").is_file():
@@ -767,12 +848,12 @@ def main():
         return asyncio.run(measure(workspace, args.variant, args.timeout_sec, kit,
                                    args.check_transport, args.checkpoint_only_sec, args.archive_model_io,
                                    args.controlled_first_program, args.controlled_patch_repair,
-                                   args.controlled_native_patch))
+                                   args.controlled_native_patch, args.controlled_native_feedback))
     with tempfile.TemporaryDirectory(prefix="ple-design-") as temporary:
         return asyncio.run(measure(Path(temporary) / "task", args.variant, args.timeout_sec, kit,
                                    args.check_transport, args.checkpoint_only_sec, args.archive_model_io,
                                    args.controlled_first_program, args.controlled_patch_repair,
-                                   args.controlled_native_patch))
+                                   args.controlled_native_patch, args.controlled_native_feedback))
 
 
 if __name__ == "__main__":
