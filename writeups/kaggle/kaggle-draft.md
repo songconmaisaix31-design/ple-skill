@@ -4,7 +4,7 @@
 
 A small change to a tool response helped an engineering agent finish four of six pump-scheduling runs on each of two pairs of held-out inputs. On a different programming error, the same change yielded five accepted edits and zero working deliveries. This difference emerged when we scored the files on disk at a fixed deadline. It would have been easy to miss by counting successful tool calls.
 
-These experiments use original scheduling problems. On the public PLE development set, two Gemma runs on the same structural task scored 0.000. The second run captured zero output files. A file-level regrade remains unavailable. The other 28 tasks have no observed score in this evidence set.
+These experiments use original scheduling problems. On the public PLE development set, three Gemma runs on the same structural task scored 0.000. The second and third runs captured zero output files. A file-level regrade remains unavailable. The other 28 tasks have no observed score in this evidence set.
 
 ## From instructions to an engineering deliverable
 
@@ -30,7 +30,7 @@ On T/U the candidate produced an accepted replacement on five runs. All five rep
 
 ## What did the model spend?
 
-The second public dev run took 252 seconds. The model server reported 12,789 input tokens and 81 output tokens, totaling 12,870. The input count includes 5,815 cached tokens. The first run has no recorded usage and contributes only a task score. Two observations on the same task yielded a mean score of zero and a sample variance of zero. This repeat measures reproducibility on one task.
+The second public dev run took 252 seconds. The model server reported 12,789 input tokens and 81 output tokens, totaling 12,870. The input count includes 5,815 cached tokens. The first run has no recorded usage and contributes only a task score. A third run doubled the context window to 16,384 using the same task contents. It scored zero after 3,801 seconds and reported 310,991 input tokens and 9,654 output tokens. The capture was empty and the logs again flagged a context limit. This single feasibility trial cannot establish an effect on score. [Third run](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45343929236)
 
 On R/S the baseline used a mean of 6,720 reported input plus output tokens per run. The instruction arm used 5,426 and completed four schedules. On T/U it used 7,856 versus 7,251 for the baseline and completed none. The host counted tokens returned by the model server. Cached inputs appear once in that total. An interrupted response can consume additional compute without returning usage. We have no billing records for these runs. Figure 2 uses measured tokens, with no conversion to currency. We held the deadline fixed across arms, so these points do not determine an accuracy plateau or predict the score available at a higher budget.
 
@@ -40,9 +40,9 @@ On R/S the baseline used a mean of 6,720 reported input plus output tokens per r
 
 | Model and role | Public PLE development evidence in this snapshot | Original paired diagnostics |
 |---|---|---|
-| Gemma 4 26B A4B, local GGUF on a GitHub Actions CPU | One checks-only task scored 0.000 twice. No LLM judge was required. | 36 scored arms across P/Q, R/S and T/U |
+| Gemma 4 26B A4B, local GGUF on a GitHub Actions CPU | One checks-only task scored 0.000 three times. No LLM judge was required. | 36 scored arms across P/Q, R/S and T/U |
 | GLM 5.2, repository-declared target at the time of analysis | No comparable scored run recorded | No matched comparison on these inputs |
 
-A full 29-task cross-model comparison remains unmeasured. Figure 3 counts distinct public tasks. Both public run records cover the same measured task. The other 28 lack an observed task outcome. Overall performance and hidden-test ranking remain unknown.
+A full 29-task cross-model comparison remains unmeasured. Figure 3 counts distinct public tasks. All three public run records cover the same measured task. The other 28 lack an observed task outcome. Overall performance and hidden-test ranking remain unknown.
 
 ![Observed outcomes and measurement coverage across the 29 public PLE development tasks.](media/dev-failures.png)

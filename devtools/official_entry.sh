@@ -17,7 +17,7 @@ raw = p.read_text()
 before = "model_api: google-cloud/glm-5.2\n"
 if raw.count(before) != 1:
     raise SystemExit("Unexpected source model declaration. Review the export profile.")
-p.write_text(raw.replace(before, "model_api: google-cloud/gemma-4-26b\n"))
+p.write_text(raw.replace(before, "model_api: google-cloud/gemma-4-26b\n").replace('  LOG_LEVEL: "info"', '  LOG_LEVEL: "info"\n  PLE_MASK_OLD_TOOL_RESULTS: "1"'))
 PYMODEL
 git init -q "$entry"
 git -C "$entry" add .

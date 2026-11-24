@@ -1,5 +1,14 @@
 # 正式开发题 wind-diaphragm-shear 的单题交付
 
+### 16,384 token 试跑结果
+
+官方生成分 **0/1**。输入目录在两个冻结版本的 SHA-256 相同。捕获器正常结束，捕获和导出文件均为 0。记录中出现上下文超限和 HTTP 4xx，未触发运行器超时。用时 3,801 秒，输入 310,991 token（含 295,236 缓存）、输出 9,654 token。官方导入器拒绝空交付，独立文件重评分缺测。按预登记停止扩展其余 28 题。该配置只跑一次，无法估计配置间的配对差或样本方差。正式覆盖仍为 1/29。
+
+[运行及作业](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45343929236/job/138273957725) · [运行提交](https://github.com/songconmaisaix31-design/ple-skill/commit/4adc832cafe190789d9969861d1f94d35060ac91) · [原始脱敏工件](context-16384-attempt-1.zip)，GitHub 工件 14900957562，SHA-256 `c40b352f354e88046948cb2f29064b01044db87feb4cbc8336bddfbfa2d15bfc`。run.json 可核对原始分，input.json 和 model-runtime.json 可核对输入、模型、种子和实际运行参数。
+
+### 此前 8,192 token 基线
+
+
 同一题的两次官方检查都记录了 **0/1**。第二次固定模型并记录交付诊断。模型产生了输出，任务结束时官方捕获器正常完成，实际捕获文件数为 0。官方导出审查返回 `empty`，缺少可供独立文件重评的 ZIP。全开发集成绩和比赛排名仍待测。[首轮评分](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45337685121/job/138253542503) · [同模型诊断](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45340782388/job/138263660203)
 
 | 正式单题尝试 | 运行提交 | 官方生成分 | 交付与复评 |

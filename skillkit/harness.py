@@ -8,6 +8,7 @@ guard-driven iteration until the guard passes or time runs out.
 import asyncio
 import base64
 import json
+import os
 import posixpath
 import re
 
@@ -23,6 +24,18 @@ WORK_BUDGET = 0.94      # leave time for a final structural check
 WRAP_BUDGET = 0.80      # switch to "close it out" mode
 FINAL_BUDGET = 0.98     # leave time for the WebSocket done frame
 CHECKPOINT_TIMEOUT = 10
+
+def mask_old_tool_results(messages):
+    positions = [i for i, message in enumerate(messages) if message.get("role") == "tool"]
+    view = list(messages)
+    count = 0
+    for i in positions[:-2]:
+        content = messages[i].get("content")
+        if isinstance(content, str) and len(content) > 256:
+            view[i] = {**messages[i], "content": "[Earlier tool output omitted. Read the file again if needed.]"}
+            count += 1
+    return view, count
+
 
 NAMED_TEXT_INPUT = re.compile(
     r"(?<![\w./-])(?:\./)?(inputs?/(?:[\w-]+/)*[\w.-]+\.(?:json|csv|txt))"
@@ -559,11 +572,16 @@ class Harness:
                                  "The budget is nearly gone. Check the deliverable is complete, "
                                  "valid and readable, then call finish with a summary."})
                 wrap_at = None
+            request_messages = messages
+            if os.environ.get("PLE_MASK_OLD_TOOL_RESULTS") == "1":
+                request_messages, masked = mask_old_tool_results(messages)
+                if masked:
+                    on_log("masked historical tool observations")
             try:
                 if self.mcp:
-                    resp = await self.model.chat(messages, system, tools=MCP_OUTPUT_TOOLS)
+                    resp = await self.model.chat(request_messages, system, tools=MCP_OUTPUT_TOOLS)
                 else:
-                    resp = await self.model.chat(messages, system)
+                    resp = await self.model.chat(request_messages, system)
             except Exception as e:
                 if self.steps == 0:
                     raise

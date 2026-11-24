@@ -167,7 +167,7 @@ def summarize(task, phase, exit_code):
                            exception=exc if exc in EXCEPTIONS else ("other" if exc else None))
         logs = "\n".join([text, str((result.get("exception_info") or {}).get("exception_message") or ""),
                           *(tail(trial / "agent" / name) for name in ("serve.log", "skillguard-harness.txt", "egress.log"))])
-        patterns = {"context_limit": r"context.length.exceeded|context.window.exceed|prompt is too long|exceeds the available context|maximum context length",
+        patterns = {"masked_history": r"masked historical tool observations", "context_limit": r"context.length.exceeded|context.window.exceed|prompt is too long|exceeds the available context|maximum context length",
                     "model_call_failed": r"model call failed after retries", "http_4xx": r"\bhttp (?:400|401|403|404|413|429)\b",
                     "export_empty": r"no dev task.*has usable artifacts"}
         observation["diagnostics"] += [k for k, v in patterns.items() if re.search(v, logs, re.I)]
