@@ -1,0 +1,237 @@
+{
+  "id": "actionable-replication-v1",
+  "created_Asia_Shanghai": "2026-11-24",
+  "question": "With the same required replace_line tool, guard and one-retry limit, does adding one fixed actionable instruction to a registered rejection improve independently scored delivery by t=395 s over the reason-code-only baseline?",
+  "source": {
+    "archive": "docs/experiments/paired-storage-v1/evidence.zip",
+    "archive_sha256": "511905b2bc72f17b92abf364eade2e2cfd2b060b86419796197f37968b5204e7",
+    "member": "d/1/text/model-io.jsonl",
+    "call": 1,
+    "source_sha256": "eba7247453712a78c991e152dd1e4bf08d80474429601e25ec7ae6fd6fbb7381",
+    "controlled_source_sha256": "f4ece9d6d7e41e93f364db640b51b50c12c947ce1639fd2af991007dd76364f2",
+    "failure": "Both arms run the same comment-stripped program and receive the identical trusted five-line excerpt around the line-81 TypeError."
+  },
+  "timing": {
+    "release_s": 250,
+    "primary_cutoff_s": 395,
+    "nominal_task_budget_s": 720,
+    "orchestration_job_limit_min": 60,
+    "dispatch_validity": "The scripted first reply must finish within 2 s of t=250 and the first live repair request must start within 5 s after release. Freeze actual files once at t=395. The orchestration limit only leaves artifact-upload margin and does not change either arm's model budget or score cutoff."
+  },
+  "split": {
+    "development": [
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+      "f",
+      "g",
+      "h",
+      "i",
+      "j",
+      "k",
+      "l",
+      "m",
+      "n",
+      "o",
+      "p",
+      "q"
+    ],
+    "new_diagnostic_inputs": [
+      "r",
+      "s"
+    ],
+    "training": [],
+    "unit": "Two unseen inputs reproduce one fixed real-model defect. Results estimate conditional recovery, not official PLE score."
+  },
+  "design": {
+    "baseline": "native-feedback: expose only replace_line(line, replacement), set tool_choice=required and max_tokens=96. For one registered rejected call, append the original assistant tool call plus exactly one tool result with accepted=false and the registered reason code, then make one immediate retry.",
+    "candidate": "native-actionable: identical to baseline except the same tool result also contains the one preregistered instruction mapped to that reason. No other prompt, tool, guard, retry or execution behavior changes.",
+    "single_changed_module": "Rejection feedback wording: opaque registered reason code versus that same code plus one fixed, generic, actionable instruction. Source, tool schema, host acceptance rules, transformed program, model, sampling, timing, retry count, execution and scoring are shared.",
+    "model": "google-cloud/gemma-4-26b through the pinned local Gemma 4 26B A4B GGUF runner",
+    "sampling": {
+      "temperature": 0,
+      "seed": 17
+    },
+    "first_arm": {
+      "r": {
+        "1": "native-feedback",
+        "2": "native-actionable",
+        "3": "native-feedback"
+      },
+      "s": {
+        "1": "native-actionable",
+        "2": "native-feedback",
+        "3": "native-actionable"
+      }
+    },
+    "evaluation": "Primary outcome is normalized independent file score at t=395 and candidate-minus-baseline paired difference. Report all 12 scores, per-case mean differences, each repeat's cross-case macro difference, grand paired mean and n-1 sample variance. Also report exact request-shape compliance, exact feedback exposure, unindented replacement rate, host acceptance/execution, repeated-retry rate and first executable-patch latency.",
+    "decision": "Require six complete pairs, correct source exposure and identical registered native tool requests in all 12 arms, reason-only feedback in all six baselines, exact mapped actionable feedback in all six candidates, and production-wrapper positive and negative controls. Continue only if all three repeat macro score differences are strictly positive and neither R nor S has a negative mean difference. Stop the feedback-wording route if complete coverage fails the score gate. Rerun only an entire technically invalid pair and preserve the first valid pair.",
+    "attempts": "Archive every attempt and reason. Never rerun a valid low score. Use the first complete valid pair in time order."
+  },
+  "feedback_contract": {
+    "baseline_payload_keys": [
+      "accepted",
+      "reason"
+    ],
+    "candidate_payload_keys": [
+      "accepted",
+      "instruction",
+      "reason"
+    ],
+    "accepted_value": false,
+    "retry_limit_per_rejected_call": 1,
+    "instructions": {
+      "invalid_json": "Return one replace_line call whose arguments are valid JSON matching the declared schema.",
+      "invalid_call_shape": "Return exactly one replace_line call with only line and replacement arguments.",
+      "wrong_line": "Use the only line value allowed by the declared tool schema.",
+      "replacement_not_string": "Make replacement a JSON string.",
+      "empty_replacement": "Make replacement a non-empty single-line string.",
+      "replacement_too_long": "Shorten replacement to at most 160 characters.",
+      "multiline_replacement": "Return one physical source line without newline characters.",
+      "leading_or_trailing_whitespace": "Return replacement without leading or trailing whitespace; the host preserves indentation.",
+      "syntax_invalid": "Return one syntactically valid Python source line and change no other line."
+    },
+    "no_solution_leakage": "No instruction contains source text, a correct replacement, program variable name, target cost, score, output, execution result, or task-specific value."
+  },
+  "cases": {
+    "r": {
+      "site": [
+        8,
+        1,
+        15,
+        6,
+        8,
+        [
+          0,
+          2,
+          5,
+          8
+        ]
+      ],
+      "periods": [
+        [
+          1,
+          3,
+          5,
+          11
+        ],
+        [
+          2,
+          6,
+          8,
+          2
+        ],
+        [
+          3,
+          3,
+          5,
+          12
+        ],
+        [
+          4,
+          5,
+          8,
+          3
+        ],
+        [
+          5,
+          3,
+          5,
+          7
+        ],
+        [
+          6,
+          4,
+          8,
+          5
+        ]
+      ],
+      "input_sha256": {
+        "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475",
+        "input/site.json": "bdebe41e7e7ba4c8b0245c45c324f3deaba0a85f7b23907d3389f7f91de8bdde",
+        "input/periods.csv": "39e6bba9c810bbff92db9dbf0aad118bed6f7b7883edc48f62868286869f044e"
+      },
+      "offline_optimal_cost_cents": 79
+    },
+    "s": {
+      "site": [
+        5,
+        0,
+        12,
+        4,
+        6,
+        [
+          0,
+          1,
+          4,
+          7
+        ]
+      ],
+      "periods": [
+        [
+          1,
+          3,
+          4,
+          11
+        ],
+        [
+          2,
+          4,
+          7,
+          3
+        ],
+        [
+          3,
+          2,
+          1,
+          13
+        ],
+        [
+          4,
+          5,
+          7,
+          8
+        ],
+        [
+          5,
+          3,
+          4,
+          3
+        ],
+        [
+          6,
+          2,
+          7,
+          8
+        ]
+      ],
+      "input_sha256": {
+        "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475",
+        "input/site.json": "c36ee0500a2cd854696e51193c511fc813feb29b246300e85218cd4a1410c037",
+        "input/periods.csv": "b97daa5c797aaf1c6ffbe5b0d31fbc4ffbe1b9313324758f5a5f0cb2ad0c76a7"
+      },
+      "offline_optimal_cost_cents": 89
+    }
+  },
+  "guard_controls": {
+    "positive": "A valid replacement from either arm scores 1. The archived broken program must fail on line 81 and score 0. The host checks both inputs before inference.",
+    "negative": [
+      "wrong tool name",
+      "multiple tool calls",
+      "unregistered reason",
+      "wrong mapped instruction",
+      "extra feedback field",
+      "instruction containing source or a replacement",
+      "more than one immediate retry"
+    ],
+    "request_lock": "All live repair requests in both arms contain exactly one function named replace_line, tool_choice required, no general tools and max_tokens 96. Retry requests contain only the payload assigned to their arm."
+  },
+  "inherits": {
+    "model_and_scoring_settings": "docs/experiments/repair-source-v1/protocol.json",
+    "controlled_source_settings": "docs/experiments/controlled-repair-replay-v1/protocol.json",
+    "reason_only_baseline": "docs/experiments/native-feedback-v1/README.md",
+    "implementation_lock": "Commit runner, instruction map, recorder, workflow, input fixtures and protocol before inference; record immutable experiment SHA, run and jobs. Run transport, request-shape, no-leakage and production-wrapper positive and negative controls before model startup."
+  }
+}

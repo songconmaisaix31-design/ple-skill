@@ -253,12 +253,12 @@ def first_code_action(lines):
     return None
 
 
-ARCHIVE_VARIANTS = ("d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q")
-CONTROLLED_VARIANTS = ("h", "i", "j", "k", "l", "m", "n", "o", "p", "q")
-PATCH_VARIANTS = ("j", "k", "l", "m", "n", "o", "p", "q")
-NATIVE_PATCH_VARIANTS = ("l", "m", "n", "o", "p", "q")
-NATIVE_FEEDBACK_VARIANTS = ("n", "o", "p", "q")
-NATIVE_ACTIONABLE_VARIANTS = ("p", "q")
+ARCHIVE_VARIANTS = ("d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s")
+CONTROLLED_VARIANTS = ("h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s")
+PATCH_VARIANTS = ("j", "k", "l", "m", "n", "o", "p", "q", "r", "s")
+NATIVE_PATCH_VARIANTS = ("l", "m", "n", "o", "p", "q", "r", "s")
+NATIVE_FEEDBACK_VARIANTS = ("n", "o", "p", "q", "r", "s")
+NATIVE_ACTIONABLE_VARIANTS = ("p", "q", "r", "s")
 CONTROLLED_RELEASE_SEC = 250
 CONTROLLED_ARCHIVE_SHA256 = "511905b2bc72f17b92abf364eade2e2cfd2b060b86419796197f37968b5204e7"
 CONTROLLED_SOURCE_SHA256 = "eba7247453712a78c991e152dd1e4bf08d80474429601e25ec7ae6fd6fbb7381"

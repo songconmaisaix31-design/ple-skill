@@ -31,11 +31,11 @@ raw, destination = map(Path, sys.argv[1:3])
 arm, position, first_arm, phase, status = sys.argv[3:]
 status = int(status)
 variant = os.environ["VARIANT"]
-controlled_trial = variant in ("h", "i", "j", "k", "l", "m", "n", "o", "p", "q")
-patch_trial = variant in ("j", "k", "l", "m", "n", "o", "p", "q")
-native_patch_trial = variant in ("l", "m", "n", "o", "p", "q")
-native_feedback_trial = variant in ("n", "o", "p", "q")
-native_actionable_trial = variant in ("p", "q")
+controlled_trial = variant in ("h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s")
+patch_trial = variant in ("j", "k", "l", "m", "n", "o", "p", "q", "r", "s")
+native_patch_trial = variant in ("l", "m", "n", "o", "p", "q", "r", "s")
+native_feedback_trial = variant in ("n", "o", "p", "q", "r", "s")
+native_actionable_trial = variant in ("p", "q", "r", "s")
 key = os.environ["MODEL_PROXY_KEY"].encode()
 inputs = ("case/task.md", "case/input/site.json", "case/input/periods.csv")
 outputs = ("case/output/schedule.csv", "case/output/summary.json")
@@ -74,7 +74,8 @@ grade = (report or {}).get("grade")
 checkpoint = (report or {}).get("checkpoint") or {}
 run_sha = os.environ["GITHUB_SHA"]
 repair_trial = variant in ("f", "g") or controlled_trial
-experiment = ("actionable-feedback-v1" if native_actionable_trial else
+experiment = ("actionable-replication-v1" if variant in ("r", "s") else
+              "actionable-feedback-v1" if native_actionable_trial else
               "native-feedback-v1" if native_feedback_trial else
               "native-patch-v1" if native_patch_trial else
               "constrained-patch-v1" if patch_trial else
