@@ -1,0 +1,157 @@
+{
+  "planned": 12,
+  "regraded": 12,
+  "complete_transcripts": 12,
+  "source_exposures": 12,
+  "prompt_interface_uses": 6,
+  "native_interface_uses": 6,
+  "request_shapes_valid": 12,
+  "candidate_patch_attempts": 57,
+  "candidate_accepted_patches": 0,
+  "candidate_native_tool_responses": 57,
+  "candidate_argument_schema_valid": 57,
+  "candidate_unindented_replacements": 0,
+  "git_shas": [
+    "b5d9defd791a22ad175d078d7aa6b055881fa73c"
+  ],
+  "generated_response_hashes": {
+    "l/1/patch-source": [
+      {
+        "call": 2,
+        "interface": "run_python_arguments",
+        "sha256": "61a1d3ff2fc050d6de69035c32323e4a8ba62b473b62c1fcf764494d70937ee1"
+      },
+      {
+        "call": 3,
+        "interface": "run_python_arguments",
+        "sha256": "796df3a5d47a690e4c4c566f4da7bb19d3e9a7589c1422131443b0264304f039"
+      },
+      {
+        "call": 4,
+        "interface": "run_python_arguments",
+        "sha256": "b6f7d21e665f74a9abbf72e51481954a315e3bcbc0d56a95dc694e69bc0deb12"
+      },
+      {
+        "call": 5,
+        "interface": "run_python_arguments",
+        "sha256": "b6f7d21e665f74a9abbf72e51481954a315e3bcbc0d56a95dc694e69bc0deb12"
+      }
+    ],
+    "l/1/native-patch": [],
+    "l/2/patch-source": [
+      {
+        "call": 2,
+        "interface": "run_python_arguments",
+        "sha256": "95d650a677f52af28ccbb32dcd557d8b3aad77ca5b551f3513cb8ecd3e856241"
+      },
+      {
+        "call": 3,
+        "interface": "run_python_arguments",
+        "sha256": "28518f8ef25f222dae57efb24f66fe6331ef1951c215ddde45e147ae04a6acd1"
+      },
+      {
+        "call": 4,
+        "interface": "run_python_arguments",
+        "sha256": "28518f8ef25f222dae57efb24f66fe6331ef1951c215ddde45e147ae04a6acd1"
+      },
+      {
+        "call": 5,
+        "interface": "run_python_arguments",
+        "sha256": "28518f8ef25f222dae57efb24f66fe6331ef1951c215ddde45e147ae04a6acd1"
+      }
+    ],
+    "l/2/native-patch": [],
+    "l/3/patch-source": [
+      {
+        "call": 2,
+        "interface": "run_python_arguments",
+        "sha256": "a3111a2d4670c8ada08579e0a71d2fd34d5aad5232eecc7e37f3e17972b50838"
+      },
+      {
+        "call": 3,
+        "interface": "run_python_arguments",
+        "sha256": "796df3a5d47a690e4c4c566f4da7bb19d3e9a7589c1422131443b0264304f039"
+      },
+      {
+        "call": 4,
+        "interface": "run_python_arguments",
+        "sha256": "753245da3b89c53aa78e904a443900ee8fe5f23d298bcca77ce7ceaccc461ba3"
+      },
+      {
+        "call": 5,
+        "interface": "run_python_arguments",
+        "sha256": "28518f8ef25f222dae57efb24f66fe6331ef1951c215ddde45e147ae04a6acd1"
+      }
+    ],
+    "l/3/native-patch": [],
+    "m/1/patch-source": [
+      {
+        "call": 2,
+        "interface": "run_python_arguments",
+        "sha256": "c9f31384d7549ee9db5d5f937de25402c8d8cf9d2326727cc702132fb80e65ae"
+      },
+      {
+        "call": 3,
+        "interface": "run_python_arguments",
+        "sha256": "9ccd8b6d8796d8dc784109af91f3d87b76176eaa92d9a8201a9a115f3dda64ac"
+      },
+      {
+        "call": 4,
+        "interface": "run_python_arguments",
+        "sha256": "9ccd8b6d8796d8dc784109af91f3d87b76176eaa92d9a8201a9a115f3dda64ac"
+      },
+      {
+        "call": 5,
+        "interface": "run_python_arguments",
+        "sha256": "9ccd8b6d8796d8dc784109af91f3d87b76176eaa92d9a8201a9a115f3dda64ac"
+      }
+    ],
+    "m/1/native-patch": [],
+    "m/2/patch-source": [
+      {
+        "call": 2,
+        "interface": "run_python_arguments",
+        "sha256": "992f5f1a87ff6a48cd782aadcc91833194e682639eab8dab41aae1c657872e00"
+      },
+      {
+        "call": 3,
+        "interface": "run_python_arguments",
+        "sha256": "97938360517b5a3a084d9036770ab3e03aca828fced2ec51a48ec416789ac0ba"
+      },
+      {
+        "call": 4,
+        "interface": "run_python_arguments",
+        "sha256": "97938360517b5a3a084d9036770ab3e03aca828fced2ec51a48ec416789ac0ba"
+      },
+      {
+        "call": 5,
+        "interface": "run_python_arguments",
+        "sha256": "9ccd8b6d8796d8dc784109af91f3d87b76176eaa92d9a8201a9a115f3dda64ac"
+      }
+    ],
+    "m/2/native-patch": [],
+    "m/3/patch-source": [
+      {
+        "call": 2,
+        "interface": "run_python_arguments",
+        "sha256": "c9f31384d7549ee9db5d5f937de25402c8d8cf9d2326727cc702132fb80e65ae"
+      },
+      {
+        "call": 3,
+        "interface": "run_python_arguments",
+        "sha256": "9ccd8b6d8796d8dc784109af91f3d87b76176eaa92d9a8201a9a115f3dda64ac"
+      },
+      {
+        "call": 4,
+        "interface": "run_python_arguments",
+        "sha256": "9ccd8b6d8796d8dc784109af91f3d87b76176eaa92d9a8201a9a115f3dda64ac"
+      },
+      {
+        "call": 5,
+        "interface": "run_python_arguments",
+        "sha256": "9ccd8b6d8796d8dc784109af91f3d87b76176eaa92d9a8201a9a115f3dda64ac"
+      }
+    ],
+    "m/3/native-patch": []
+  }
+}

@@ -1,0 +1,145 @@
+{
+  "cases": [
+    "l",
+    "m"
+  ],
+  "seed": 17,
+  "release_sec": 250,
+  "snapshot_sec": 395,
+  "complete": true,
+  "counts_by_arm": {
+    "patch-source": {
+      "planned": 6,
+      "measured": 6,
+      "repair_requests": 6,
+      "source_exposures": 6,
+      "timing_valid": 6,
+      "first_repair_responses_completed": 6,
+      "prompt_patch_interface_uses": 6,
+      "native_patch_interface_uses": 0,
+      "request_shapes_valid": 6,
+      "patch_attempts": 24,
+      "accepted_patches": 0,
+      "tool_responses": 24,
+      "native_tool_responses": 0,
+      "native_argument_schema_valid": 0,
+      "native_unindented_replacements": 0,
+      "nonempty_text_responses": 0
+    },
+    "native-patch": {
+      "planned": 6,
+      "measured": 6,
+      "repair_requests": 6,
+      "source_exposures": 6,
+      "timing_valid": 6,
+      "first_repair_responses_completed": 6,
+      "prompt_patch_interface_uses": 0,
+      "native_patch_interface_uses": 6,
+      "request_shapes_valid": 6,
+      "patch_attempts": 57,
+      "accepted_patches": 0,
+      "tool_responses": 57,
+      "native_tool_responses": 57,
+      "native_argument_schema_valid": 57,
+      "native_unindented_replacements": 0,
+      "nonempty_text_responses": 0
+    }
+  },
+  "paired_results_by_case": {
+    "l": {
+      "pairs": [
+        {
+          "repeat": 1,
+          "patch-source": 0.0,
+          "native-patch": 0.0,
+          "native_patch_minus_patch_source": 0.0
+        },
+        {
+          "repeat": 2,
+          "patch-source": 0.0,
+          "native-patch": 0.0,
+          "native_patch_minus_patch_source": 0.0
+        },
+        {
+          "repeat": 3,
+          "patch-source": 0.0,
+          "native-patch": 0.0,
+          "native_patch_minus_patch_source": 0.0
+        }
+      ],
+      "mean_paired_difference": 0.0,
+      "wins": 0,
+      "ties": 3,
+      "losses": 0
+    },
+    "m": {
+      "pairs": [
+        {
+          "repeat": 1,
+          "patch-source": 0.0,
+          "native-patch": 0.0,
+          "native_patch_minus_patch_source": 0.0
+        },
+        {
+          "repeat": 2,
+          "patch-source": 0.0,
+          "native-patch": 0.0,
+          "native_patch_minus_patch_source": 0.0
+        },
+        {
+          "repeat": 3,
+          "patch-source": 0.0,
+          "native-patch": 0.0,
+          "native_patch_minus_patch_source": 0.0
+        }
+      ],
+      "mean_paired_difference": 0.0,
+      "wins": 0,
+      "ties": 3,
+      "losses": 0
+    }
+  },
+  "case_macro_score_by_repeat": [
+    {
+      "repeat": 1,
+      "patch-source": 0.0,
+      "native-patch": 0.0,
+      "native_patch_minus_patch_source": 0.0
+    },
+    {
+      "repeat": 2,
+      "patch-source": 0.0,
+      "native-patch": 0.0,
+      "native_patch_minus_patch_source": 0.0
+    },
+    {
+      "repeat": 3,
+      "patch-source": 0.0,
+      "native-patch": 0.0,
+      "native_patch_minus_patch_source": 0.0
+    }
+  ],
+  "across_repeat_statistics": {
+    "patch-source": {
+      "n": 3,
+      "mean": 0.0,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    },
+    "native-patch": {
+      "n": 3,
+      "mean": 0.0,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    },
+    "native_patch_minus_patch_source": {
+      "n": 3,
+      "mean": 0.0,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    }
+  },
+  "registered_decision": "stop_candidate_no_gain",
+  "failure_diagnosis": "The candidate used the sole required replace_line tool, but returned an indented replacement that violated the registered host contract; its attempted expression also continued to index integer pump values. No candidate patch was accepted.",
+  "interpretation": "This controlled diagnostic estimates recovery conditional on one fixed induced failure. It is separate from the official PLE development score."
+}
