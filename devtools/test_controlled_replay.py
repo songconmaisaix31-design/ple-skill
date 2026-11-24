@@ -54,7 +54,8 @@ class FeedbackStub(LiveStub):
 def check_executable_patch(source):
     encoded = base64.b64encode(source.encode()).decode()
     wrapper = f"import base64; exec(compile(base64.b64decode('{encoded}'), '<run_python>', 'exec'))"
-    for variant, expected in (("l", 49), ("m", 54), ("n", 57), ("o", 67)):
+    for variant, expected in (("l", 49), ("m", 54), ("n", 57), ("o", 67),
+                              ("p", 80), ("q", 54)):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary) / "case"
             prepare(workspace, variant)
@@ -182,6 +183,47 @@ async def check_provider():
             assert len(emitted) == 1 and emitted[0]["reason"] == "leading_or_trailing_whitespace"
             assert set(json.loads(emitted[0]["content"])) == {"accepted", "reason"}
             assert "sum(" not in emitted[0]["content"] and "total_pump_units" not in emitted[0]["content"]
+
+            actionable_archive = runner.ModelIOArchive(Path(temporary) / "actionable.jsonl")
+            actionable_live = FeedbackStub([
+                {"content": "", "tool_calls": [invalid_call], "usage": {},
+                 "finish_reason": "tool_calls"},
+                {"content": "", "tool_calls": [corrected_call], "usage": {},
+                 "finish_reason": "tool_calls"},
+            ])
+            actionable_model = runner.ControlledNativeActionableModel(
+                actionable_live, source, elapsed, actionable_archive, [], {})
+            await actionable_model.chat([{"role": "user", "content": "frozen"}], "system", tools=[])
+            actionable_archive.request({"model": actionable_live.model, "messages": [], "max_tokens": 96})
+            actionable_reply = await actionable_model.chat(
+                [{"role": "user", "content": "repair"}], "system")
+            assert actionable_reply["tool_calls"][0]["name"] == "run_python"
+            actionable_result = json.loads(actionable_live.messages_seen[1][-1]["content"])
+            assert actionable_result == {
+                "accepted": False,
+                "instruction": runner.REJECTION_INSTRUCTIONS["leading_or_trailing_whitespace"],
+                "reason": "leading_or_trailing_whitespace",
+            }
+            assert set(runner.REJECTION_INSTRUCTIONS) == {
+                "invalid_json", "invalid_call_shape", "wrong_line", "replacement_not_string",
+                "empty_replacement", "replacement_too_long", "multiline_replacement",
+                "leading_or_trailing_whitespace", "syntax_invalid",
+            }
+            protocol = json.loads((Path(__file__).resolve().parents[1]
+                                   / "docs/experiments/actionable-feedback-v1/protocol.json").read_bytes())
+            assert protocol["feedback_contract"]["instructions"] == runner.REJECTION_INSTRUCTIONS
+            forbidden = ("total_pump_units", "sum(", "combination", "target cost", "score", "output/")
+            assert all(not any(token in text for token in forbidden)
+                       for text in runner.REJECTION_INSTRUCTIONS.values())
+            actionable_records = [json.loads(line)
+                                  for line in actionable_archive.path.read_text().splitlines()]
+            actionable_emitted = [row for row in actionable_records
+                                  if row.get("event") == "patch_feedback"]
+            assert len(actionable_emitted) == 1
+            assert set(json.loads(actionable_emitted[0]["content"])) == {
+                "accepted", "reason", "instruction",
+            }
+            assert actionable_archive.finish()["complete"] is True
 
             direct_archive = runner.ModelIOArchive(Path(temporary) / "feedback-direct.jsonl")
             direct_live = FeedbackStub([{

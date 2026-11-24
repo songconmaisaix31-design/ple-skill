@@ -222,6 +222,46 @@ jobs:
               raise SystemExit("native-patch-v1/attempts.json differs from replay")
           PYNATIVE
 
+          feedback=docs/experiments/native-feedback-v1
+          feedback_replay="$RUNNER_TEMP/native-feedback-v1"
+          mkdir -p "$feedback_replay"
+          python3 devtools/build_native_feedback_evidence.py \
+            --protocol "$feedback/protocol.json" \
+            --job n:1:"$feedback/attempts/run-45303145848-n1-attempt-1.zip" \
+            --job n:2:"$feedback/attempts/run-45303145848-n2-attempt-2.zip" \
+            --job n:3:"$feedback/attempts/run-45303145848-n3-attempt-1.zip" \
+            --job o:1:"$feedback/attempts/run-45303145848-o1-attempt-1.zip" \
+            --job o:2:"$feedback/attempts/run-45303145848-o2-attempt-1.zip" \
+            --job o:3:"$feedback/attempts/run-45303145848-o3-attempt-1.zip" \
+            --output "$feedback_replay/evidence.zip" \
+            --audit "$feedback_replay/attempts.json"
+          cmp "$feedback/evidence.zip" "$feedback_replay/evidence.zip"
+          python3 devtools/verify_native_feedback_evidence.py \
+            --archive "$feedback_replay/evidence.zip" \
+            --protocol "$feedback/protocol.json" \
+            --settings-protocol docs/experiments/repair-source-v1/protocol.json \
+            --csv "$feedback_replay/trials.csv" \
+            --details "$feedback_replay/code-coverage.json"
+          python3 devtools/native_feedback_report.py "$feedback_replay/trials.csv" \
+            --output "$feedback_replay/summary.json"
+          python3 - "$feedback" "$feedback_replay" <<'PYFEEDBACK'
+          import csv
+          import json
+          import sys
+          from pathlib import Path
+
+          saved, replay = map(Path, sys.argv[1:])
+          with (saved / "trials.csv").open(newline="") as a, (replay / "trials.csv").open(newline="") as b:
+              archived, rebuilt = csv.DictReader(a), csv.DictReader(b)
+              if archived.fieldnames != rebuilt.fieldnames or list(archived) != list(rebuilt):
+                  raise SystemExit("native-feedback-v1/trials.csv differs from replay")
+          for name in ("summary.json", "code-coverage.json"):
+              if json.loads((saved / name).read_bytes()) != json.loads((replay / name).read_bytes()):
+                  raise SystemExit(f"native-feedback-v1/{name} differs from replay")
+          if json.loads((saved / "attempts/attempts.json").read_bytes()) != json.loads((replay / "attempts.json").read_bytes()):
+              raise SystemExit("native-feedback-v1/attempts.json differs from replay")
+          PYFEEDBACK
+
       - name: Exchange the authorized runner identity for a temporary Hugging Face token
         if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' }}
         shell: bash

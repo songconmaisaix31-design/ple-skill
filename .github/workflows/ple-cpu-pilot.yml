@@ -17,13 +17,13 @@ permissions:
 jobs:
   cpu-model:
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        variant: ${{ fromJSON(github.event.head_commit.message == 'Run native feedback replay on N and O' && '["n","o"]' || github.event.head_commit.message == 'Run native patch replay on L and M' && '["l","m"]' || github.event.head_commit.message == 'Run constrained patch replay on J and K' && '["j","k"]' || github.event.head_commit.message == 'Run controlled repair replay on H and I' && '["h","i"]' || github.event.head_commit.message == 'Test source context in a fixed-seed repair ablation' && '["f","g"]' || github.event.head_commit.message == 'Replicate the first Python action with a fixed seed' && '["d","e"]' || startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') && '["a","b","c"]' || github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' && '["a","b"]' || '["a"]') }}
-        strategy: ${{ fromJSON((github.event.head_commit.message == 'Run native feedback replay on N and O' || github.event.head_commit.message == 'Run native patch replay on L and M' || github.event.head_commit.message == 'Run constrained patch replay on J and K' || github.event.head_commit.message == 'Run controlled repair replay on H and I' || github.event.head_commit.message == 'Replicate the first Python action with a fixed seed' || github.event.head_commit.message == 'Test source context in a fixed-seed repair ablation') && '["paired"]' || startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') && '["legacy","native","text"]' || '["legacy"]') }}
-        repeat: ${{ fromJSON((github.event.head_commit.message == 'Run native feedback replay on N and O' || github.event.head_commit.message == 'Run native patch replay on L and M' || github.event.head_commit.message == 'Run constrained patch replay on J and K' || github.event.head_commit.message == 'Run controlled repair replay on H and I' || github.event.head_commit.message == 'Replicate the first Python action with a fixed seed' || github.event.head_commit.message == 'Test source context in a fixed-seed repair ablation') && '[1,2,3]' || '[1]') }}
+        variant: ${{ fromJSON(github.event.head_commit.message == 'Run actionable feedback replay on P and Q' && '["p","q"]' || github.event.head_commit.message == 'Run native feedback replay on N and O' && '["n","o"]' || github.event.head_commit.message == 'Run native patch replay on L and M' && '["l","m"]' || github.event.head_commit.message == 'Run constrained patch replay on J and K' && '["j","k"]' || github.event.head_commit.message == 'Run controlled repair replay on H and I' && '["h","i"]' || github.event.head_commit.message == 'Test source context in a fixed-seed repair ablation' && '["f","g"]' || github.event.head_commit.message == 'Replicate the first Python action with a fixed seed' && '["d","e"]' || startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') && '["a","b","c"]' || github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' && '["a","b"]' || '["a"]') }}
+        strategy: ${{ fromJSON((github.event.head_commit.message == 'Run actionable feedback replay on P and Q' || github.event.head_commit.message == 'Run native feedback replay on N and O' || github.event.head_commit.message == 'Run native patch replay on L and M' || github.event.head_commit.message == 'Run constrained patch replay on J and K' || github.event.head_commit.message == 'Run controlled repair replay on H and I' || github.event.head_commit.message == 'Replicate the first Python action with a fixed seed' || github.event.head_commit.message == 'Test source context in a fixed-seed repair ablation') && '["paired"]' || startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') && '["legacy","native","text"]' || '["legacy"]') }}
+        repeat: ${{ fromJSON((github.event.head_commit.message == 'Run actionable feedback replay on P and Q' || github.event.head_commit.message == 'Run native feedback replay on N and O' || github.event.head_commit.message == 'Run native patch replay on L and M' || github.event.head_commit.message == 'Run constrained patch replay on J and K' || github.event.head_commit.message == 'Run controlled repair replay on H and I' || github.event.head_commit.message == 'Replicate the first Python action with a fixed seed' || github.event.head_commit.message == 'Test source context in a fixed-seed repair ablation') && '[1,2,3]' || '[1]') }}
     env:
       DESIGN_BENCH: ${{ github.event.head_commit.message == 'Evaluate original storage designs on cloud CPU' || startsWith(github.event.head_commit.message, 'Compare Python action strategies on cloud CPU') }}
       VERIFY_MCP: ${{ startsWith(github.event.head_commit.message, 'Check PLE tool transport on the cloud CPU') }}
@@ -57,7 +57,7 @@ jobs:
             --kit-root "$RUNNER_TEMP/ple-official" --check-transport | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Verify the controlled repair fixture and wrapper
-        if: ${{ matrix.strategy == 'paired' && (matrix.variant == 'h' || matrix.variant == 'i' || matrix.variant == 'j' || matrix.variant == 'k' || matrix.variant == 'l' || matrix.variant == 'm' || matrix.variant == 'n' || matrix.variant == 'o') }}
+        if: ${{ matrix.strategy == 'paired' && (matrix.variant == 'h' || matrix.variant == 'i' || matrix.variant == 'j' || matrix.variant == 'k' || matrix.variant == 'l' || matrix.variant == 'm' || matrix.variant == 'n' || matrix.variant == 'o' || matrix.variant == 'p' || matrix.variant == 'q') }}
         shell: bash
         run: |
           protocol=docs/experiments/controlled-repair-replay-v1/protocol.json
@@ -69,6 +69,9 @@ jobs:
           fi
           if [[ "${{ matrix.variant }}" == n || "${{ matrix.variant }}" == o ]]; then
             protocol=docs/experiments/native-feedback-v1/protocol.json
+          fi
+          if [[ "${{ matrix.variant }}" == p || "${{ matrix.variant }}" == q ]]; then
+            protocol=docs/experiments/actionable-feedback-v1/protocol.json
           fi
           PYTHONPATH=devtools "$RUNNER_TEMP/ple-official/.venv/bin/python" devtools/verify_repair_fixture.py \
             --protocol "$protocol" \
@@ -178,6 +181,8 @@ jobs:
             m:1|l:2|m:3) arms=(native-patch patch-source) ;;
             n:1|o:2|n:3) arms=(native-patch native-feedback) ;;
             o:1|n:2|o:3) arms=(native-feedback native-patch) ;;
+            p:1|q:2|p:3) arms=(native-feedback native-actionable) ;;
+            q:1|p:2|q:3) arms=(native-actionable native-feedback) ;;
             *) echo 'Unexpected replication pair.' >&2; exit 1 ;;
           esac
 
@@ -201,7 +206,7 @@ jobs:
           overall=0
           position=0
           controlled=()
-          if [[ "$VARIANT" == h || "$VARIANT" == i || "$VARIANT" == j || "$VARIANT" == k || "$VARIANT" == l || "$VARIANT" == m || "$VARIANT" == n || "$VARIANT" == o ]]; then
+          if [[ "$VARIANT" == h || "$VARIANT" == i || "$VARIANT" == j || "$VARIANT" == k || "$VARIANT" == l || "$VARIANT" == m || "$VARIANT" == n || "$VARIANT" == o || "$VARIANT" == p || "$VARIANT" == q ]]; then
             controlled=(--controlled-first-program)
           fi
           for arm in "${arms[@]}"; do
@@ -211,7 +216,8 @@ jobs:
             patch=()
             native_patch=()
             native_feedback=()
-            if [[ "$arm" == text-source || "$arm" == patch-source || "$arm" == native-patch || "$arm" == native-feedback ]]; then
+            native_actionable=()
+            if [[ "$arm" == text-source || "$arm" == patch-source || "$arm" == native-patch || "$arm" == native-feedback || "$arm" == native-actionable ]]; then
               action_mode=text
               export PLE_REPAIR_CONTEXT=source
             fi
@@ -223,6 +229,9 @@ jobs:
             fi
             if [[ "$arm" == native-feedback ]]; then
               native_feedback=(--controlled-native-feedback)
+            fi
+            if [[ "$arm" == native-actionable ]]; then
+              native_actionable=(--controlled-native-actionable)
             fi
             raw="$private/$arm"
             evidence="$public/$arm"
@@ -242,7 +251,7 @@ jobs:
                     status=0
                     PLE_CODE_ACTION="$action_mode" "$python" devtools/run_design_regression.py \
                       --kit-root "$kit" --variant "$VARIANT" --timeout-sec 720 --checkpoint-only-sec 395 \
-                      "${controlled[@]}" "${patch[@]}" "${native_patch[@]}" "${native_feedback[@]}" \
+                      "${controlled[@]}" "${patch[@]}" "${native_patch[@]}" "${native_feedback[@]}" "${native_actionable[@]}" \
                       --keep-dir "$raw/case" --archive-model-io "$raw/model-io.jsonl" \
                       > "$raw/experiment.log" 2>&1 || status=$?
                   fi
