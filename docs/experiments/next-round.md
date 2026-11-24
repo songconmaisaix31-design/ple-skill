@@ -1,6 +1,12 @@
 # PLE 实验接续记录
 
-## 当前进度：R/S 达到继续门槛，T/U 检验不同故障
+## 当前进度：T/U 已结束，转向正式开发题交付
+
+T/U 六个首次配对、十二臂全部复评。基线和候选均得 0，三个重复的宏配对差及其样本方差均为 0。候选五次修好了替换格式，但提交的补丁都引用了另一个未定义变量。按已登记门槛停止纠正句跨故障推广。[原始工件、单次分数及图表](actionable-name-error-v1/README.md)
+
+**正式流程的下一步**是复现并归档 `wind-diaphragm-shear`。基线为运行 `45337685121`，官方记录单题 0/1 后评测器以 1 退出，未导出可独立复核的参赛产物。只调整评测记录与导出流程，保留任务、harness、声明模型、运行参数与预算；如必须换模型，单列为新基线。主要指标是能否保存官方导出、识别退出阶段，并用官方评分器从保存的文件重评得到一致分数。导出、复评及运行状态能相互核对后才扩展到全开发集；基础设施故障保留错误证据，缺少可复核产物的尝试不进入模型收益比较。后续修改模型或算法前先登记试验参数、次数和继续门槛。[正式单题日志](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45337685121/job/138253542503)
+
+## R/S 复验与 T/U 预登记记录
 
 R/S 候选 4/6 满分，基线 0/6，三个重复差值 +0.5、+0.5、+1，均值 2/3、样本方差 1/12。所有交付可从六份原始工件独立复评。[完整报告](actionable-replication-v1/README.md)
 
@@ -124,5 +130,5 @@ H/I 已通过离线正负对照。两题以错误程序运行时均无交付、�
 
 ## 正式 PLE 开发集
 
-正式题最近一次运行在获取受限数据前收到 Hugging Face OIDC 的 `invalid_grant`，评分步骤跳过。当前未取得正式开发集得分。正式成绩单列，保留对应的模型、官方任务、评分器及运行证据。[正式题运行](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45204574378/job/137796706042) · [官方数据集](https://huggingface.co/datasets/google/physical-engineerings-last-exam)
+早期尝试在受限数据下载前收到 Hugging Face OIDC 的 `invalid_grant`。之后运行 `45337685121` 成功读取正式题、记录单题 0/1 后以 1 退出。完整 29 题得分待测。正式成绩单列，保留对应的模型、官方任务、评分器及运行证据。[本次单题评分](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45337685121/job/138253542503) · [早期授权失败](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45204574378/job/137796706042) · [官方数据集](https://huggingface.co/datasets/google/physical-engineerings-last-exam)
 

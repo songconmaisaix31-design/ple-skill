@@ -1,4 +1,4 @@
-"""Regrade original P/Q Actions bundles. Run from the repository root."""
+"""Regrade frozen rejection-feedback Actions bundles from the repository root."""
 import argparse
 import csv
 import hashlib
@@ -8,7 +8,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from verify_paired_storage_evidence import replay, require
-from verify_native_feedback_evidence import FENCE, PROGRAM_SHA
+from verify_native_feedback_evidence import FENCE
 
 ROOT = Path("docs/experiments/actionable-feedback-v1")
 SHA = "33e9cf3e2338e0b140a5c9fb075d5de6b1ada172"
@@ -46,9 +46,12 @@ def trial(bundle, case, repeat, arm, protocol, protocol_hash, run_sha):
     responses = {r["call"]: r for r in rows if r["event"] == "response"}
     require(set(requests) == set(range(1, rows[-1]["requests"] + 1)), "requests")
     source = FENCE.fullmatch(responses[1]["choices"][0]["message"]["content"])[1]
-    require(digest(source.encode()) == PROGRAM_SHA, "common failure")
+    require(digest(source.encode()) == protocol["source"]["controlled_source_sha256"], "common program")
     excerpt = "\n".join(f"{n}: {source.splitlines()[n-1]}" for n in range(79, 84))
-    require(requests[2]["body"]["messages"][2]["content"].endswith(excerpt), "source exposure")
+    observation = requests[2]["body"]["messages"][2]["content"]
+    require(observation.endswith(excerpt), "source exposure")
+    if protocol["id"] == "actionable-name-error-v1":
+        require("NameError: name 'pump_quantities' is not defined" in observation, "expected NameError")
     release = responses[1]["end_sec"]
     require(abs(release-250) <= 2 and release <= requests[2]["start_sec"] <= release+5, "release")
     feedback = {r["call"]: r for r in rows if r["event"] == "patch_feedback"}
@@ -98,10 +101,17 @@ def trial(bundle, case, repeat, arm, protocol, protocol_hash, run_sha):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--replication", action="store_true", help="replay the R/S replication")
-    replication = parser.parse_args().replication
-    root = ROOT.with_name("actionable-replication-v1") if replication else ROOT
-    run_sha = "96f19575311504ba4f4327e9ca6708bc3cd87a48" if replication else SHA
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--replication", action="store_true", help="replay the R/S replication")
+    selection.add_argument("--name-error", action="store_true", help="replay the T/U NameError test")
+    args = parser.parse_args()
+    root, run_sha = ROOT, SHA
+    if args.replication:
+        root = ROOT.with_name("actionable-replication-v1")
+        run_sha = "96f19575311504ba4f4327e9ca6708bc3cd87a48"
+    elif args.name_error:
+        root = ROOT.with_name("actionable-name-error-v1")
+        run_sha = "c33fff94fc0572bbf13f2ac24919838d2329a0c8"
     data = (root / "protocol.json").read_bytes()
     protocol = json.loads(data)
     manifest = json.loads((root / "attempts/manifest.json").read_text())

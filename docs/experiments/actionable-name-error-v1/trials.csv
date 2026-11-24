@@ -1,0 +1,13 @@
+case,repeat,arm,score,reason,cost,feedback,completed_retries,repeated,calls,unindented,accepted,first_accepted_sec,schema_sha256
+t,1,native-feedback,0.0,output must contain exactly schedule.csv and summary.json,,6,5,5,11,0,0,,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+t,1,native-actionable,0.0,output must contain exactly schedule.csv and summary.json,,5,4,3,9,1,1,312.261,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+t,2,native-feedback,0.0,output must contain exactly schedule.csv and summary.json,,6,6,6,12,0,0,,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+t,2,native-actionable,0.0,output must contain exactly schedule.csv and summary.json,,5,5,4,10,1,1,293.412,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+t,3,native-feedback,0.0,output must contain exactly schedule.csv and summary.json,,5,4,4,9,0,0,,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+t,3,native-actionable,0.0,output must contain exactly schedule.csv and summary.json,,4,4,3,8,0,0,,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+u,1,native-feedback,0.0,output must contain exactly schedule.csv and summary.json,,6,6,6,12,0,0,,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+u,1,native-actionable,0.0,output must contain exactly schedule.csv and summary.json,,5,4,3,9,1,1,294.103,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+u,2,native-feedback,0.0,output must contain exactly schedule.csv and summary.json,,6,6,6,12,0,0,,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+u,2,native-actionable,0.0,output must contain exactly schedule.csv and summary.json,,5,4,3,9,1,1,293.442,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+u,3,native-feedback,0.0,output must contain exactly schedule.csv and summary.json,,6,6,6,12,0,0,,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+u,3,native-actionable,0.0,output must contain exactly schedule.csv and summary.json,,5,4,3,9,1,1,295.168,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75

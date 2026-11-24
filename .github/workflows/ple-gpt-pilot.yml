@@ -15,6 +15,8 @@ jobs:
   pilot:
     runs-on: ubuntu-24.04
     timeout-minutes: 150
+    env:
+      DIAGNOSE_GEMMA: ${{ github.event.head_commit.message == 'Diagnose official Gemma baseline' }}
     permissions:
       contents: read
       id-token: write
@@ -263,7 +265,7 @@ jobs:
           PYFEEDBACK
 
       - name: Exchange the authorized runner identity for a temporary Hugging Face token
-        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' }}
+        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' || github.event.head_commit.message == 'Diagnose official Gemma baseline' }}
         shell: bash
         run: |
           umask 077
@@ -298,7 +300,7 @@ jobs:
 
       - name: Check existing Hugging Face dataset credentials
         id: hf_credential
-        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' }}
+        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' || github.event.head_commit.message == 'Diagnose official Gemma baseline' }}
         shell: bash
         env:
           PLE_HF_CONFIGURED_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
@@ -361,7 +363,7 @@ jobs:
 
       - name: Verify and download the official checks-only task
         id: dataset_access
-        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' }}
+        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' || github.event.head_commit.message == 'Diagnose official Gemma baseline' }}
         shell: bash
         env:
           PLE_HF_CONFIGURED_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
@@ -369,7 +371,7 @@ jobs:
           PLE_HF_CREDENTIAL_STATE: ${{ steps.hf_credential.outputs.state }}
           HF_HUB_DISABLE_TELEMETRY: '1'
           HF_HUB_DISABLE_PROGRESS_BARS: '1'
-          PLE_UNATTENDED: ${{ github.event.head_commit.message == 'Run authorized PLE pilot' }}
+          PLE_UNATTENDED: ${{ github.event.head_commit.message == 'Run authorized PLE pilot' || github.event.head_commit.message == 'Diagnose official Gemma baseline' }}
         run: |
           unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN HF_TOKEN HUGGING_FACE_HUB_TOKEN HF_OIDC_ID_TOKEN HF_OIDC_RESOURCE
           export HF_ENDPOINT=https://huggingface.co
@@ -426,7 +428,8 @@ jobs:
                   break
           print("Hugging Face dataset access verified.")
           try:
-              revision = api.dataset_info(repo, revision="main").sha or ""
+              revision = ("e0c21fa558c3127785656398e3b3bd7da5e5a5a6" if os.environ["DIAGNOSE_GEMMA"] == "true"
+                          else api.dataset_info(repo, revision="main").sha or "")
               if not re.fullmatch(r"[a-f0-9]{40}", revision):
                   raise RuntimeError("Invalid dataset revision")
               snapshot_download(repo, repo_type="dataset", revision=revision,
@@ -446,7 +449,7 @@ jobs:
 
       - name: Check the configured hosted models
         id: hosted_model
-        if: steps.dataset_access.outputs.ready == 'true'
+        if: steps.dataset_access.outputs.ready == 'true' && env.DIAGNOSE_GEMMA != 'true'
         shell: bash
         env:
           PLE_OPENAI_API_KEY: ${{ secrets.PLE_OPENAI_API_KEY }}
@@ -500,7 +503,7 @@ jobs:
 
       - name: Start an account-free CPU model
         id: cpu_model
-        if: steps.dataset_access.outputs.ready == 'true' && steps.hosted_model.outputs.ready != 'true'
+        if: ${{ !cancelled() && steps.dataset_access.outputs.ready == 'true' && steps.hosted_model.outputs.ready != 'true' }}
         shell: bash
         run: |
           unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN HF_HOME HF_TOKEN HUGGING_FACE_HUB_TOKEN
@@ -511,7 +514,9 @@ jobs:
           export MODEL_PROXY_KEY
           printf '::add-mask::%s\n' "$MODEL_PROXY_KEY"
           python="$RUNNER_TEMP/ple-official/.venv/bin/python"
-          for profile in gemma26 granite; do
+          profiles=(gemma26 granite)
+          if [[ "$DIAGNOSE_GEMMA" == true ]]; then profiles=(gemma26); fi
+          for profile in "${profiles[@]}"; do
             export PLE_CPU_EVAL_GREEDY=false
             if [[ "$profile" == gemma26 ]]; then export PLE_CPU_EVAL_GREEDY=true; fi
             if bash devtools/start_cpu_model.sh "$profile"; then
@@ -619,6 +624,11 @@ jobs:
             --tasks-dir "$PLE_TASKS_DIR" --trials 1 --attempts 1 --no-export --out "$out" \
             "${model_args[@]}" >"$log" 2>&1 || status=$?
 
+          if [[ "$DIAGNOSE_GEMMA" == true ]]; then
+            python3 "$GITHUB_WORKSPACE/devtools/official_trial_diagnostic.py" "$out" "$log" "$status" \
+              "$RUNNER_TEMP/ple-official-diagnostic.json"
+            cat "$RUNNER_TEMP/ple-official-diagnostic.json"
+          fi
           python3 - "$out/results.json" "$log" "$status" "$PLE_EVAL_MODEL_API" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
           import json
           import math
@@ -653,6 +663,15 @@ jobs:
               print(f"Official evaluator exited {exit_status} after recording the score.")
               raise SystemExit(1)
           PY
+
+      - name: Archive numerical pilot diagnostics
+        if: ${{ always() && env.DIAGNOSE_GEMMA == 'true' && steps.entry_preparation.outputs.ready == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ple-official-gemma-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ple-official-diagnostic.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Stop local model processes
         if: ${{ always() }}
