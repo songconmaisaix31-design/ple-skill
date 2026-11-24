@@ -11,16 +11,19 @@ on:
 permissions:
   contents: read
   actions: read
+env:
+  PLE_ENTRY_SOURCE_SHA: ${{ github.event_name == 'push' && github.event.head_commit.message == 'Run official PLE export single data-hall-mep-routing' && '35306a8edc3e053a6b67a8e8701ad2caeb168e08' || github.sha }}
 concurrency:
   group: ple-official-export-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   plan:
-    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Run official PLE export pilot' || startsWith(github.event.head_commit.message, 'Run official PLE export cohort ')
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Run official PLE export pilot' || github.event.head_commit.message == 'Run official PLE export single data-hall-mep-routing' || startsWith(github.event.head_commit.message, 'Run official PLE export cohort ')
     runs-on: ubuntu-24.04
     outputs:
       remaining: ${{ steps.tasks.outputs.remaining }}
       prior: ${{ steps.mode.outputs.prior }}
+      single: ${{ steps.mode.outputs.single }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with: {fetch-depth: 0, persist-credentials: false}
@@ -30,11 +33,20 @@ jobs:
           PRIOR: ${{ inputs.pilot_run }}
         shell: bash
         run: |
-          if [[ "$TITLE" == 'Run official PLE export cohort '* ]]; then
-            PRIOR=${TITLE#Run official PLE export cohort }
-            [[ -n "$PRIOR" ]]
+          single=wind-diaphragm-shear
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            case "$TITLE" in
+              'Run official PLE export pilot') ;;
+              'Run official PLE export single data-hall-mep-routing') single=data-hall-mep-routing ;;
+              'Run official PLE export cohort '*)
+                PRIOR=${TITLE#Run official PLE export cohort }
+                [[ -n "$PRIOR" ]] ;;
+              *) exit 1 ;;
+            esac
           fi
           [[ -z "$PRIOR" || "$PRIOR" =~ ^[1-9][0-9]+$ ]]
+          if [[ -n "$PRIOR" ]]; then single=''; fi
+          echo "single=$single" >> "$GITHUB_OUTPUT"
           echo "prior=$PRIOR" >> "$GITHUB_OUTPUT"
       - run: bash devtools/official_entry.sh
       - if: steps.mode.outputs.prior != ''
@@ -60,7 +72,7 @@ jobs:
         with: {fetch-depth: 0, persist-credentials: false}
       - uses: ./.github/actions/official-task
         with:
-          task: wind-diaphragm-shear
+          task: ${{ needs.plan.outputs.single }}
           hf-token: ${{ secrets.PLE_HF_TOKEN }}
   cohort:
     needs: plan
@@ -92,7 +104,7 @@ jobs:
       - run: bash devtools/official_entry.sh
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          pattern: ple-export-*-attempt-*
+          pattern: ple-export-${{ needs.plan.outputs.single || '*' }}-attempt-*
           path: ${{ runner.temp }}/shards
       - if: env.PILOT_RUN != ''
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093

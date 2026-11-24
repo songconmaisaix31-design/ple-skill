@@ -9,7 +9,9 @@ git -C "$kit" fetch --quiet --depth 1 https://github.com/google-research/ple.git
 git -C "$kit" checkout --quiet --detach FETCH_HEAD
 mkdir "$entry"
 paths=(.gitattributes .gitignore LICENSE submission.yaml requirements.txt serve.py skillkit skills)
-git -C "$GITHUB_WORKSPACE" archive "$GITHUB_SHA" -- "${paths[@]}" | tar -x -C "$entry"
+entry_source=${PLE_ENTRY_SOURCE_SHA:-$GITHUB_SHA}
+[[ "$entry_source" =~ ^[0-9a-f]{40}$ ]]
+git -C "$GITHUB_WORKSPACE" archive "$entry_source" -- "${paths[@]}" | tar -x -C "$entry"
 python3 - "$entry/submission.yaml" <<'PYMODEL'
 import pathlib, sys
 p = pathlib.Path(sys.argv[1])
@@ -21,7 +23,7 @@ p.write_text(raw.replace(before, "model_api: google-cloud/gemma-4-26b\n").replac
 PYMODEL
 git init -q "$entry"
 git -C "$entry" add .
-runtime=$(git -C "$GITHUB_WORKSPACE" log -1 --format=%H "$GITHUB_SHA" -- "${paths[@]}")
+runtime=$(git -C "$GITHUB_WORKSPACE" log -1 --format=%H "$entry_source" -- "${paths[@]}")
 stamp=$(git -C "$GITHUB_WORKSPACE" show -s --format=%cI "$runtime")
 GIT_AUTHOR_DATE="$stamp" GIT_COMMITTER_DATE="$stamp" git -C "$entry" -c user.name='PLE evaluation' -c user.email='ple@localhost' commit -qm "Gemma runtime from $runtime"
 python3 -m venv "$RUNNER_TEMP/ple-bootstrap"

@@ -4,7 +4,7 @@
 
 A small change to a tool response helped an engineering agent finish four of six pump-scheduling runs on each of two pairs of held-out inputs. On a different programming error, the same change yielded five accepted edits and zero working deliveries. This difference emerged when we scored the files on disk at a fixed deadline. It would have been easy to miss by counting successful tool calls.
 
-These experiments use original scheduling problems. On the public PLE development set, five Gemma runs on the same structural task scored 0.000. Runs 2–5 each captured zero files. The first run's capture count is unknown. An independent file-level score remains unavailable for all five runs, and the other 28 tasks have no observed score.
+These experiments use original scheduling problems. On the public PLE development set, five runs with a self-hosted, third-party quantization of Gemma on the same structural task scored 0.000. Runs 2–5 each captured zero files. The first run's capture count is unknown. An independent file-level score remains unavailable for all five runs, and the other 28 tasks have no observed score. These trials are development diagnostics. The competition requires the declared sponsored model, and eligibility of the self-hosted quantization has not been established.
 
 ## From instructions to an engineering deliverable
 
@@ -27,6 +27,10 @@ We froze each new input pair before running it. For each input we ran three alte
 | T/U, undefined variable, fresh inputs | 0/6 | 0/6 | 0, 0, 0 | 0 | 0 |
 
 On T/U the candidate produced an accepted replacement on five runs. All five replacements referred to another undefined variable and failed when the program ran. The simple instruction fixed the representation of a patch. It supplied no information about which variable held the intended pump quantity. We stopped expanding this intervention after it failed the preregistered requirement for positive gains in every repetition. [P/Q](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45324245738) · [R/S](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45330869706) · [T/U](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45337689208)
+
+We replayed the saved files for all 36 arms and matched the tool receipts to executed programs. In the instruction arm, 16 of 18 runs had at least one accepted patch; only eight delivered the two optimal files at 395 seconds. In each of those eight, the first accepted patch still raised a type error. The second accepted patch wrote both files. Those executions returned between 329.11 and 380.90 seconds after task start. This bounds when both writes had finished; we only graded file contents at the fixed deadline. The 18 baseline runs delivered no files. These are additional measurements on the same experiments.
+
+MLE-bench similarly reports making a submission, producing a valid submission and earning a medal as separate outcomes. On our pump tasks an accepted edit and an independently scored file also captured different events. [MLE-bench, Table 2](https://arxiv.org/pdf/2410.07095)
 
 ## What did the model spend?
 

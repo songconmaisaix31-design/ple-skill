@@ -30,4 +30,5 @@ replay_status=0
 timeout -k 60s -s INT 60m "$python" eval/run.py --artifacts "$entry" --tasks "$TASK" --tasks-dir "$tasks" \
   --trials 1 --attempts 1 --out "$RUNNER_TEMP/replay" >"$RUNNER_TEMP/replay.log" 2>&1 || replay_status=$?
 "$python" "$helper" summarize "$TASK" replay "$replay_status"
+"$python" "$GITHUB_WORKSPACE/devtools/official_target.py" "$TASK" replay
 "$python" "$helper" verify "$TASK"

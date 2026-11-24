@@ -1,6 +1,6 @@
 # 正式开发集的交付与文件重评
 
-第一步仅运行 `wind-diaphragm-shear`。沿用提交 harness，准备独立 Git 仓库，根目录包含 MIT 许可证。生成和提交均声明 `google-cloud/gemma-4-26b`。生成端为自托管的 Unsloth Gemma 4 26B A4B IT，量化文件 `UD-IQ2_XXS`，SHA-256 为 `52f98e6fc6df62438dff8f57ac049f60b4c36acf93786b6aeeedc129acc02343`。llama.cpp 为 b12651，默认贪心采样，种子 17，正式候选 16384 上下文，一个并发槽位，最多四个 CPU 线程。规则型题目使用任务自带的检查器。需要语言模型评审时使用相同的自托管 Gemma，赛事方会重新评分。
+第一步仅运行 `wind-diaphragm-shear`。沿用提交 harness，准备独立 Git 仓库，根目录包含 MIT 许可证。当前开发诊断在配置中声明 `google-cloud/gemma-4-26b`。生成端为自托管的 Unsloth Gemma 4 26B A4B IT，量化文件 `UD-IQ2_XXS`，SHA-256 为 `52f98e6fc6df62438dff8f57ac049f60b4c36acf93786b6aeeedc129acc02343`。llama.cpp 为 b12651，默认贪心采样，种子 17，开发候选 16384 上下文，一个并发槽位，最多四个 CPU 线程。规则型题目使用任务自带的检查器。需要语言模型评审时使用相同的自托管 Gemma，该 judge 仅供开发诊断。仅凭声明无法确认第三方量化模型的参赛资格。用于 Kaggle 的交付必须来自已核实的赞助模型，记录端点、请求和响应身份及用量，再对同一产物完成文件复评与 kit 验收。
 
 **wind 单题的上下文实验。** 基线提交 `ce7abfe1ea8968e0cd777793558aaa5b4903152b` 在 [Actions 45340782388](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45340782388) 中使用 8192 上下文。评分器实测 0/1，捕获文件 0，记录 input 12789、output 81、cache 5815 tokens。其日志标记为 `context_limit`、`http_4xx`、`export_empty`。累计输入 token 数包含多次调用。正式候选仅将 llama.cpp 的上下文上限升至 16384。模型权重、生成代码、种子、采样和并发与基线一致。首次探测检查是否仍触发上下文错误、捕获文件数和可独立重评分数；如未交付则保留本次尝试并停止扩展。数据快照或运行限制有差异时按下段分别报告。
 
@@ -12,4 +12,6 @@
 
 **产物与分数。** 公开前，使用官方导入器从原始记录重建产物，暂存目录只含原始交付捕获。可选的 agent 轨迹留在临时运行机上。对全部评分文件、最终消息和删除清单逐字节核对，并检查公开产物是否完整复制了受限输入。检查失败时记录原因，扣住文件。分片保留实际计算环境、输入哈希、运行观测、官方审查、原始导出与独立文件评分。评测失败的分片保留结构化异常、捕获状态和 token 数。合并使用官方 `kit artifacts --from`，核对每道题目清单完整性和全仓库来源，随后运行含 smoke、MCP 和取消测试的 `kit check`。就绪的打包目录提供 `submission.tar.gz` 及其 SHA-256。阶段均值按全部 29 题为分母，并同时列出缺项、实测单题和可用题数。此数为本地预览。正式排名须以赛事接受提交后的回执为准。
 
-**中途恢复试跑和提交身份。** [本轮独立登记及原创对照](context-recovery-v1/README.md)列出候选触发条件、与在途基线的关系和继续门槛。当前实验分支的正式入口为下一次试跑打开一次恢复；普通入口默认关闭。新诊断要求 wind 目标 ZIP 在原始捕获、完整导出和实际复评输入间哈希相同并可逐成员读完。官方重评、合包及 kit check 均完成后，打包作业把完整提交 SHA 和 tar、Git bundle 的 SHA-256 写入 submission-identity.json。发布时从该 bundle 恢复确切提交，验证远端公开链接指向该提交，再将其完整 SHA 写入 Kaggle 稿顶并核对既有回执。
+**中途恢复试跑和提交身份。** [本轮独立登记及原创对照](context-recovery-v1/README.md)列出候选触发条件、与在途基线的关系和继续门槛。当前实验分支的正式入口为下一次试跑打开一次恢复；普通入口默认关闭。新诊断要求 wind 目标 ZIP 在原始捕获、完整导出和实际复评输入间哈希相同并可逐成员读完。官方重评、合包及 kit check 均完成后，打包作业把完整提交 SHA 和 tar、Git bundle 的 SHA-256 写入 submission-identity.json。开发诊断 bundle 单独归档。正式产物通过模型来源核对后，从对应赞助模型的 bundle 恢复确切提交，验证远端公开链接指向该提交，再将其完整 SHA 写入 Kaggle 稿顶并核对既有回执。
+
+**官方单文件任务的开发基线。** 精确标题 `Run official PLE export single data-hall-mep-routing` 只准备、生成和重评预选的 MEP 单题。该入口的任务选择规则、固定源 SHA、输入哈希、与 wind 的先后顺序、验收与停止门槛见[11 月 24 日登记](delivery-plan-2026-11-24/README.md)。传统 pilot 与 cohort 仍按各自登记执行。

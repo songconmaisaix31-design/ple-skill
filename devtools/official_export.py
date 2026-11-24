@@ -80,6 +80,8 @@ def download(task):
                          "architecture": platform.machine(), "logical_cpus": os.cpu_count(),
                          "memory_bytes": os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"),
                          "free_disk_bytes_at_input": shutil.disk_usage(TEMP).free},
+              "generation_backend": "self-hosted llama.cpp / Unsloth UD-IQ2_XXS",
+              "evidence_scope": "development_diagnostic",
               "cpu_inference": {"max_threads": 4, "context_requested": 16384, "concurrent_slots": 1},
               "harbor": "0.20.0", "judge_model": "gemma-4-26b", "repetitions": 1}
     write("input.json", record)
@@ -207,6 +209,19 @@ def summarize(task, phase, exit_code):
         console = tail(trial / "agent/serve.log")
         if phase == "run":
             observation["harness_stage"] = harness_stage(console)
+            # The kit bounds its relay console to 1M characters (up to 4MB
+            # UTF-8). Early events can be outside the usual 256 KiB log tail.
+            relay = tail(trial / "agent/skillguard-harness.txt", limit=4 * 1024 * 1024)
+            messages = set(relay.splitlines())
+            markers = {
+                "zip_prompt_added": "early ZIP target missing; prompted for grounded members",
+                "zip_prompt_answered": "early ZIP reminder sent to model",
+                "zip_checkpoint_present": "early ZIP target present; skipped prompt",
+                "zip_checkpoint_unknown": "early ZIP target unknown; skipped prompt",
+            }
+            observation["diagnostics"].extend(
+                key for key, message in markers.items() if "harness: " + message in messages
+            )
         logs = "\n".join([text, console, str((result.get("exception_info") or {}).get("exception_message") or ""),
                           *(tail(trial / "agent" / name) for name in ("skillguard-harness.txt", "egress.log"))])
         patterns = {"trimmed_recent": r"trimmed recent tool observations", "masked_history": r"masked historical tool observations", "context_limit": r"context.length.exceeded|context.window.exceed|prompt is too long|exceeds the available context|maximum context length",
@@ -250,9 +265,9 @@ def verify(task):
             "archive_sha256": sha256(EVIDENCE / "export.tar.gz"),
             "harbor_environment_sha256": sha256(EVIDENCE / "harbor-environment.txt"),
             "kit_environment_sha256": sha256(EVIDENCE / "kit-environment.txt")}
-    if task == PILOT:
-        from official_target import verified_target
-        data["target"] = verified_target(EVIDENCE / "target.json")
+    from official_target import requires_target, verified_target
+    if requires_target(task):
+        data["target"] = verified_target(EVIDENCE / "target.json", task)
     write("verified.json", data)
 
 

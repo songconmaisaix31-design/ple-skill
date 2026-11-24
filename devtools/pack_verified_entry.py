@@ -20,7 +20,8 @@ def digest(path):
 def pack(entry, evidence):
     if json.loads((evidence / "kit-check.json").read_bytes()).get("ready") is not True:
         raise ValueError("kit check did not pass")
-    if not json.loads((evidence / "submission-scores.json").read_bytes()).get("usable", 0):
+    scores = json.loads((evidence / "submission-scores.json").read_bytes())
+    if not scores.get("usable", 0):
         raise ValueError("there is no verified file regrade")
     if git(entry, "status", "--porcelain", "--untracked-files=no", capture_output=True).stdout:
         raise ValueError("tracked entry differs from its verified commit")
@@ -44,6 +45,9 @@ def pack(entry, evidence):
     sha = digest(archive)
     (evidence / "submission.sha256").write_text(sha + "\n")
     (evidence / "submission-identity.json").write_text(json.dumps({
+        "competition_model_verified": False,
+        "generation_backends": {task: row.get("generation_backend", "unverified")
+                                for task, row in scores.get("by_task", {}).items()},
         "submission_commit": commit, "submission_tar_sha256": sha,
         "submission_bundle_sha256": digest(bundle),
     }, indent=2) + "\n")

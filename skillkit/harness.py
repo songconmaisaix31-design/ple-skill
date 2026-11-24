@@ -25,6 +25,14 @@ WRAP_BUDGET = 0.80      # switch to "close it out" mode
 FINAL_BUDGET = 0.98     # leave time for the WebSocket done frame
 CHECKPOINT_TIMEOUT = 10
 
+EARLY_ZIP_PROMPT = (
+    "The requested ZIP is still missing. In your next tool call, write a substantive "
+    "requested member into the ZIP at its specified path using evidence you have already "
+    "read. If that member needs another input, read only what you need and then write it. "
+    "Preserve existing work. Avoid placeholders and copies of inputs used as filler. "
+    "Continue building the remaining members and verify them before reporting completion."
+)
+
 def mask_old_tool_results(messages, *, limit_recent=False):
     positions = [i for i, message in enumerate(messages) if message.get("role") == "tool"]
     view = list(messages)
@@ -324,6 +332,30 @@ class Harness:
         if written == target or (deliverable.endswith("/") and written.startswith(target + "/")):
             self._checkpoint_due = True
 
+    async def _observe_zip_target(self, path):
+        # lstat also detects directories and dangling links at the target path.
+        program = (
+            "import os, sys\n"
+            "try:\n    os.lstat(sys.argv[1])\n"
+            "except FileNotFoundError:\n    print('ple-zip-target-missing')\n"
+            "else:\n    print('ple-zip-target-present')"
+        )
+        target = posixpath.join(self.workdir, path)
+        command = f"{quote_path(self.t.python_cmd)} -I -S -c {quote_path(program)} {quote_path(target)}"
+        try:
+            async with asyncio.timeout(3):
+                result = await self.t.exec(command, 3)
+        except Exception:
+            return "unknown"
+        if (not isinstance(result, dict) or result.get("ok") is not True
+                or result.get("exit_code") != 0 or result.get("timed_out") or result.get("truncated")):
+            return "unknown"
+        output = result.get("output")
+        if isinstance(output, str):
+            return {"ple-zip-target-missing": "missing", "ple-zip-target-present": "present"}.get(
+                output.strip(), "unknown")
+        return "unknown"
+
     async def _check_deliverable(self):
         self._checkpoint_due = False
         if self._guard_result is None:
@@ -621,6 +653,7 @@ class Harness:
                 messages.append({"role": "user", "content": observation})
 
         asked = 0
+        zip_prompt_pending = False
         can_recover_context = os.environ.get("PLE_RECOVER_CONTEXT_ONCE") == "1"
         while self.steps < MAX_STEPS:
             if wrap_at is not None and clock() >= wrap_at:
@@ -649,10 +682,14 @@ class Harness:
                 if can_recover_context and context_recovery.is_context_rejection(e):
                     can_recover_context = False
                     messages = context_recovery.fresh_messages(self.instruction)
+                    zip_prompt_pending = False
                     asked = 0
                     on_log("starting fresh history after a context rejection")
                     continue
                 break
+            if zip_prompt_pending:
+                on_log("early ZIP reminder sent to model")
+                zip_prompt_pending = False
             self.steps += 1
             if on_usage:
                 on_usage(resp["usage"])
@@ -696,6 +733,18 @@ class Harness:
                     result["content"] = await self._do(call)
                 except (TypeError, ValueError, AttributeError) as e:
                     result["content"] = f"Invalid arguments for {call['name']}: {e}"
+
+            if self.steps == 4 and os.environ.get("PLE_EARLY_ZIP_WRITE") == "1":
+                path = self.spec.get("deliverable") or ""
+                if (self.spec.get("mode") == "zip" and path.lower().endswith(".zip")
+                        and any(call["name"] != "finish" for call in calls)):
+                    state = await self._observe_zip_target(path)
+                    if state == "missing":
+                        messages.append({"role": "user", "content": EARLY_ZIP_PROMPT})
+                        zip_prompt_pending = True
+                        on_log("early ZIP target missing; prompted for grounded members")
+                    else:
+                        on_log(f"early ZIP target {state}; skipped prompt")
 
             # guard: only when something was actually written since the last check
             if self._since_guard >= 0:
