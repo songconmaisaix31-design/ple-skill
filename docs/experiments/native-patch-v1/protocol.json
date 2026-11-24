@@ -1,0 +1,73 @@
+{
+  "id": "native-patch-v1",
+  "created_Asia_Shanghai": "2026-11-24",
+  "question": "With the same failed source, feedback and 96-token cap, does replacing a prompt-only JSON contract plus general tools with one required native replace_line tool improve independently scored delivery by t=395 s?",
+  "source": {
+    "archive": "docs/experiments/paired-storage-v1/evidence.zip",
+    "archive_sha256": "511905b2bc72f17b92abf364eade2e2cfd2b060b86419796197f37968b5204e7",
+    "member": "d/1/text/model-io.jsonl",
+    "call": 1,
+    "source_sha256": "eba7247453712a78c991e152dd1e4bf08d80474429601e25ec7ae6fd6fbb7381",
+    "controlled_source_sha256": "f4ece9d6d7e41e93f364db640b51b50c12c947ce1639fd2af991007dd76364f2",
+    "failure": "Both arms run the same comment-stripped program and receive the identical trusted five-line excerpt around the line-81 TypeError."
+  },
+  "timing": {
+    "release_s": 250,
+    "primary_cutoff_s": 395,
+    "nominal_task_budget_s": 720,
+    "dispatch_validity": "The scripted first reply must finish within 2 s of t=250 and the first live repair request must start within 5 s after release. Freeze actual files once at t=395."
+  },
+  "split": {
+    "development": ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
+    "new_diagnostic_inputs": ["l", "m"],
+    "training": [],
+    "unit": "Two unseen inputs reproduce one fixed real-model defect. Results estimate conditional recovery, not official PLE score."
+  },
+  "design": {
+    "baseline": "patch-source: identical failure and five-line source; append the J/K compact-JSON contract, retain the existing six general tools, tool_choice=auto and max_tokens=96. The same host line guard converts an accepted patch into one run_python call.",
+    "candidate": "native-patch: identical failure and source; expose only replace_line(line, replacement), set tool_choice=required and max_tokens=96. The same host guard allows only line 81, a stripped nonempty single line of at most 160 characters, parses the transformed full program and converts an accepted patch into one run_python call.",
+    "single_changed_module": "Repair interface enforcement: prompt-only JSON plus general tools versus one required schema-constrained native tool. Source, observation, response cap, host guard, transformed program, execution, model, sampling, timing and scoring are shared.",
+    "model": "google-cloud/gemma-4-26b through the pinned local Gemma 4 26B A4B GGUF runner",
+    "sampling": {"temperature": 0, "seed": 17},
+    "first_arm": {
+      "l": {"1": "patch-source", "2": "native-patch", "3": "patch-source"},
+      "m": {"1": "native-patch", "2": "patch-source", "3": "native-patch"}
+    },
+    "evaluation": "Primary outcome is normalized independent file score at t=395 and candidate-minus-baseline paired difference. Report all 12 scores, per-case mean differences, each repeat's cross-case macro difference, grand paired mean and n-1 sample variance. Also report first-response completion, exact tool-set compliance, valid replace_line calls, host acceptance/execution and first executable-patch latency.",
+    "decision": "Require six complete pairs, correct source exposure in all 12 arms, candidate requests containing only the registered required replace_line tool in all six candidate arms, and production-wrapper positive and negative controls. Continue only if all three repeat macro differences are strictly positive and neither L nor M has a negative mean difference. Stop the native ACI if complete coverage fails the score gate. Rerun only an entire technically invalid pair and preserve the first valid pair.",
+    "attempts": "Archive every attempt and reason. Never rerun a valid low score. Use the first complete valid pair in time order."
+  },
+  "cases": {
+    "l": {
+      "site": [7, 1, 14, 5, 8, [0, 3, 5, 8]],
+      "periods": [[1, 3, 5, 12], [2, 6, 8, 2], [3, 2, 3, 10], [4, 5, 5, 5], [5, 2, 8, 1], [6, 4, 5, 8]],
+      "input_sha256": {
+        "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475",
+        "input/site.json": "c94af047132fb27d15cf82fd771464d35c4dfc0a9642307782cd0ec01dd89631",
+        "input/periods.csv": "58750be45aa4de4aa60579b1960cffe56b095fd3c1eddcf49ec97dbe6c1aecc8"
+      },
+      "offline_optimal_cost_cents": 49
+    },
+    "m": {
+      "site": [4, 0, 11, 4, 6, [0, 2, 4, 6]],
+      "periods": [[1, 2, 4, 9], [2, 4, 6, 3], [3, 5, 6, 1], [4, 1, 2, 12], [5, 3, 4, 4], [6, 2, 6, 7]],
+      "input_sha256": {
+        "task.md": "7315532979c9857398430d3e9f6ccebd5ca5dd00cc392917bea1629b7077f475",
+        "input/site.json": "f52fb1939969c31d950662dbd0789c8318f5b38e7e7b1e34a7a6ff46315cc1da",
+        "input/periods.csv": "e07ee5c007a927e52645fe92bc7b917102f232dc9d1aa4a390600db515adadc6"
+      },
+      "offline_optimal_cost_cents": 54
+    }
+  },
+  "guard_controls": {
+    "positive": "Both prompt and native wrappers must transform the exact valid line-81 replacement into one run_python call; executing that call must score 1 with costs 49 and 54 on L/M.",
+    "negative": ["wrong tool name", "multiple tool calls", "wrong line", "extra argument", "multiline replacement", "syntax-invalid replacement"],
+    "request_lock": "Candidate live requests contain exactly one function named replace_line, tool_choice required, no general tools and max_tokens 96. Baseline live requests retain the six general tools, tool_choice auto and max_tokens 96."
+  },
+  "inherits": {
+    "model_and_scoring_settings": "docs/experiments/repair-source-v1/protocol.json",
+    "controlled_source_settings": "docs/experiments/controlled-repair-replay-v1/protocol.json",
+    "failed_baseline": "docs/experiments/constrained-patch-v1/README.md",
+    "implementation_lock": "Commit runner, wrappers, recorder, workflow, input fixtures and protocol before inference; record immutable experiment SHA, run and jobs. Run transport, request-shape, production-wrapper positive and negative controls before model startup."
+  }
+}

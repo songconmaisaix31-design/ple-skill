@@ -1,0 +1,13 @@
+case,repeat,arm,order,seed,score,feasible,optimal,measured,submitted_cost_cents,evidence_status,transcript_complete,requests_archived,responses_archived,git_sha,repair_requested,source_feedback_observed,source_line,completed_files,controlled_release_sec,repair_dispatch_sec,controlled_timing_valid,repair_response_completed,native_patch_interface_used,request_shape_valid,patch_responses_completed,patch_attempts,patch_accepted,tool_responses,native_tool_responses,native_argument_schema_valid,native_unindented_replacements,feedback_exposed,feedback_events,feedback_requests,feedback_payloads_valid,feedback_retry_responses_completed,repeated_retry_responses,nonempty_text_responses,length_finished_responses
+n,1,native-patch,1,17,0.0,0,0,1,,regraded,1,11,10,4263783ac1a5a4012f83a1b9f67696e217651438,1,1,81,0,250.002,250.23,1,1,1,1,9,9,0,9,9,9,0,0,0,0,0,0,0,0,0
+n,1,native-feedback,2,17,0.0,0,0,1,,regraded,1,13,12,4263783ac1a5a4012f83a1b9f67696e217651438,1,1,81,0,250.001,250.224,1,1,1,1,11,11,0,11,11,11,0,1,6,6,6,5,5,0,0
+n,2,native-patch,2,17,0.0,0,0,1,,regraded,1,19,18,4263783ac1a5a4012f83a1b9f67696e217651438,1,1,81,0,250.002,250.367,1,1,1,1,17,17,0,17,17,17,0,0,0,0,0,0,0,0,0
+n,2,native-feedback,1,17,0.0,0,0,1,,regraded,1,19,18,4263783ac1a5a4012f83a1b9f67696e217651438,1,1,81,0,250.001,250.249,1,1,1,1,17,17,0,17,17,17,0,1,9,9,9,8,8,0,0
+n,3,native-patch,1,17,0.0,0,0,1,,regraded,1,9,8,4263783ac1a5a4012f83a1b9f67696e217651438,1,1,81,0,250.002,250.314,1,1,1,1,7,7,0,7,7,7,0,0,0,0,0,0,0,0,0
+n,3,native-feedback,2,17,0.0,0,0,1,,regraded,1,10,9,4263783ac1a5a4012f83a1b9f67696e217651438,1,1,81,0,250.001,250.314,1,1,1,1,8,8,0,8,8,8,0,1,4,4,4,4,4,0,0
+o,1,native-patch,2,17,0.0,0,0,1,,regraded,1,8,7,4263783ac1a5a4012f83a1b9f67696e217651438,1,1,81,0,250.002,250.315,1,1,1,1,6,6,0,6,6,6,0,0,0,0,0,0,0,0,0
+o,1,native-feedback,1,17,0.0,0,0,1,,regraded,1,10,9,4263783ac1a5a4012f83a1b9f67696e217651438,1,1,81,0,250.001,250.305,1,1,1,1,8,8,0,8,8,8,0,1,4,4,4,4,4,0,0
+o,2,native-patch,1,17,0.0,0,0,1,,regraded,1,12,11,4263783ac1a5a4012f83a1b9f67696e217651438,1,1,81,0,250.001,250.22,1,1,1,1,10,10,0,10,10,10,0,0,0,0,0,0,0,0,0
+o,2,native-feedback,2,17,0.0,0,0,1,,regraded,1,12,11,4263783ac1a5a4012f83a1b9f67696e217651438,1,1,81,0,250.0,252.827,1,1,1,1,10,10,0,10,10,10,0,1,5,5,5,5,5,0,0
+o,3,native-patch,2,17,0.0,0,0,1,,regraded,1,11,10,4263783ac1a5a4012f83a1b9f67696e217651438,1,1,81,0,250.001,250.224,1,1,1,1,9,9,0,9,9,9,0,0,0,0,0,0,0,0,0
+o,3,native-feedback,1,17,0.0,0,0,1,,regraded,1,13,12,4263783ac1a5a4012f83a1b9f67696e217651438,1,1,81,0,250.001,250.219,1,1,1,1,11,11,0,11,11,11,0,1,6,6,6,5,5,0,0

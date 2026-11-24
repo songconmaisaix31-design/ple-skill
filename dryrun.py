@@ -113,6 +113,9 @@ async def main():
     spec = specgen.build(inst)
     rel = (spec["deliverable"] or "output/answer.docx").lstrip("/")
     spec["deliverable"] = rel
+    spec["required_files"] = [path.lstrip("/") for path in spec.get("required_files", [])]
+    for key in ("required_csv_headers", "required_csv_columns"):
+        spec[key] = {path.lstrip("/"): columns for path, columns in spec.get(key, {}).items()}
     target = os.path.join(tmp, rel)
     helper = os.path.join(tmp, "_ple_stub_helper.py")
     with open(helper, "w", encoding="utf-8") as f:
@@ -129,7 +132,9 @@ async def main():
     print("\n=== FINAL MESSAGE ===")
     print(final[:1200])
     print(f"\nsteps={h.steps}  file exists={os.path.exists(target)}")
-    return 0 if os.path.exists(target) else 1
+    status, _ = await h.guard.run()
+    print(f"Final artifact check: {status}")
+    return 0 if os.path.exists(target) and status in {"PASS", "WARN"} else 1
 
 
 if __name__ == "__main__":

@@ -1,0 +1,49 @@
+{
+  "experiment": "controlled-repair-replay-v1",
+  "selection_rule": "For each pair, use the first complete independently regradable whole-pair artifact fixed before inspecting its score; retry only technical failures.",
+  "attempts": [
+    {
+      "run_id": 45245652599,
+      "git_sha": "5ff7fbf53b54b9fb1c59cabefa4b43f9efae21d5",
+      "status": "invalid_before_inference",
+      "reason": "The independent experiment branch omitted the frozen prior-D evidence archive. No model inference or score was produced."
+    },
+    {
+      "run_id": 45245913028,
+      "git_sha": "9fcdb2b859cf0cd892cc3d2638642df6b8f00ca0",
+      "status": "invalid_recorder_schema",
+      "reason": "The H/I protocol reader used the older split.cases schema and raised KeyError: cases. No qualifying whole-pair record entered analysis."
+    },
+    {
+      "run_id": 45246424026,
+      "git_sha": "55a02ad1bbd3f2afd6d29869e8797a9b879c51e0",
+      "status": "partial_technical_failure",
+      "reason": "Four early pairs failed at model_start because the 9.92 GB Hugging Face download ended with HTTP/2 CANCEL. I3 was the first complete valid I3 pair and was locked into the main analysis.",
+      "main_pairs": ["i/3"]
+    },
+    {
+      "run_id": 45247632095,
+      "git_sha": "c3d73111cd1f90ae57fb3e9fdef27c23152989e8",
+      "status": "excluded_non_matrix_run",
+      "reason": "The download-hardening push triggered the workflow default A/legacy job; it was not an H/I paired experiment."
+    },
+    {
+      "run_id": 45247679226,
+      "run_attempt": 1,
+      "git_sha": "de4be67625116a599f8c5d39d3eb10ed117db03c",
+      "status": "five_valid_one_cancelled",
+      "reason": "H3, I1, I2, I3 and H2 produced complete artifacts; H1 reached the 40-minute job limit and was cancelled without an artifact. The duplicate I3 was archived but excluded because the earlier complete I3 was already fixed.",
+      "main_pairs": ["h/2", "h/3", "i/1", "i/2"],
+      "excluded_complete_pairs": ["i/3"]
+    },
+    {
+      "run_id": 45247679226,
+      "run_attempt": 2,
+      "job_id": 137973972058,
+      "git_sha": "de4be67625116a599f8c5d39d3eb10ed117db03c",
+      "status": "valid_targeted_retry",
+      "reason": "Only the cancelled H1 whole pair was rerun with unchanged settings.",
+      "main_pairs": ["h/1"]
+    }
+  ]
+}

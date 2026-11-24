@@ -1,0 +1,105 @@
+{
+  "planned": 12,
+  "regraded": 12,
+  "missing_arms": 0,
+  "complete_transcripts": 12,
+  "git_sha": "52dc6b2f683dc5295529843530fe2ee4ea6e1c71",
+  "programs": {
+    "d/1/legacy": [
+      {
+        "call": 1,
+        "interface": "run_python",
+        "source_sha256": "df0bc8d6068dd23566a93724447c35c4281b4d02a0585bf7eea769d2dc6cf6e6",
+        "parseable": true
+      }
+    ],
+    "d/1/text": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "227b07fe463fded3055698bfc3c361ca930dc4c48bbfa05bf58c092143fbcc7e",
+        "parseable": true
+      }
+    ],
+    "d/2/legacy": [
+      {
+        "call": 1,
+        "interface": "run_python",
+        "source_sha256": "bbf3b8acf8f0322a675fda713d4b90709e35301da9cd89ff7ff2997c6f419fbb",
+        "parseable": true
+      }
+    ],
+    "d/2/text": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "227b07fe463fded3055698bfc3c361ca930dc4c48bbfa05bf58c092143fbcc7e",
+        "parseable": true
+      }
+    ],
+    "d/3/legacy": [
+      {
+        "call": 1,
+        "interface": "run_python",
+        "source_sha256": "6221749a0e7ee87ece5bb5876f235550e583c5d561f4c114a57c675252fa756e",
+        "parseable": true
+      }
+    ],
+    "d/3/text": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "227b07fe463fded3055698bfc3c361ca930dc4c48bbfa05bf58c092143fbcc7e",
+        "parseable": true
+      }
+    ],
+    "e/1/legacy": [
+      {
+        "call": 1,
+        "interface": "run_python",
+        "source_sha256": "2e33adfe14f8adfbae2128fc1db88414c5a6191c0dd910ec8902dee40f01ea11",
+        "parseable": true
+      }
+    ],
+    "e/1/text": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "9ba69e3e7044093704dbea018060be99eb0ed7e21b44400af976d71ed345b078",
+        "parseable": true
+      }
+    ],
+    "e/2/legacy": [
+      {
+        "call": 1,
+        "interface": "run_python",
+        "source_sha256": "912ecb41325b56bb12d1f79beec1c24e741f75a2862f0dd98050489abaa81389",
+        "parseable": true
+      }
+    ],
+    "e/2/text": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "27224b345646fa5ae54dae889a830d05ddf243338947b3558e33281c08bfc276",
+        "parseable": true
+      }
+    ],
+    "e/3/legacy": [
+      {
+        "call": 1,
+        "interface": "run_python",
+        "source_sha256": "0b485a1e0b3e44d1497cffd1800becbdbcd4a1fd9fef7ca0d92cf95d9a068e3d",
+        "parseable": true
+      }
+    ],
+    "e/3/text": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "1650c0a33146fdd1f29f1b0c99542c955fd403c01fb805d8f942ecced5156699",
+        "parseable": true
+      }
+    ]
+  }
+}

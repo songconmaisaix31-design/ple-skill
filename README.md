@@ -2,8 +2,11 @@
 
 Physical-Engineering's Last Exam 参赛 harness。**spec-first + 交付物守卫**的第一版实现。
 
-> **评测状态（2026-11-23）**：官方 `kit validate` 通过，`kit check` 通过配置解析后停在缺少模型代理配置，独立构建检查确认当前环境没有 Docker。离线闭环、原生 Claude 协议冒烟和 F-01 静态检查已通过。尚未运行公开 dev set，暂无官方 dev 分数或参赛 `artifacts/`。
-> 本文的「三项指标」是**对 baseline artifacts 的离线静态回归**，不是本 harness 跑过 29 题。
+> **云端实测（2026-11-23）**　Gemma 4 26B A4B 在 GitHub Actions 的 CPU 上完成了自建梁受力计算题。第 395 秒通过 1/8 项，约 647 秒时通过 8/8 项，包含四个独立校验的数值。[运行日志](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45171069072)
+> **正式开发集（2026-11-24）**　受限题集已成功下载。Gemma 4 26B A4B 的本地量化版本在单题 `wind-diaphragm-shear` 上记录 0/1，评测器随后返回 1。该试跑使用单独的 Gemma 入口，GLM 参赛版本的正式交付仍待验证。[运行记录](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45337685121/job/138253542503)
+> **提交口径**　官方开发集均分的分母为 29。套件允许逐题导出，至少一题须具有可用产物，未覆盖的题计零。提交前从原文件重评并运行完整 `kit check`。[官方产物规范](https://github.com/google-research/ple/blob/main/docs/artifacts.md)
+> **固定种子复验**　开发集 A/B/C 上，Gemma 首轮使用 Python 后在第 395 秒交付了 3/3 个最优解。两道新留出题各重复三次，原工具循环均分 0.00，首轮 Python 均分 0.50，三轮配对分差的样本方差为 0。提升全部来自 E；D 两组均失败。12 次运行的归档产物已独立重评。最新正式单题结果见上。[逐次成绩、图表与证据包](docs/experiments/paired-storage-v1/README.md) · [实验方法](docs/03-validation-methods.md)
+> 下文“三项指标”衡量对主办方基线产物的离线静态回归。
 > 剩余任务、阻塞项、运行手册与合规红线见 **[HANDOFF.md](HANDOFF.md)**；评估原件见 `docs/00-接手评估.md`，修复记录见 `docs/01-修复与验证记录.md`，**F-01 处置说明见 `docs/02-合规说明.md`**。
 
 设计原点：**MCP 作为中心**——serve.py 持有会话与决策循环，所有动作（exec / read_file /
@@ -101,10 +104,8 @@ bash devtools/wsl-run.sh ready    # 校验产物、重判、完整 kit check
    workdir 根目录就失效）。
 2. **守卫是结构性的**：只查路径、可解析性、列头、必需件，不判断工程内容对不对。
 3. **CSV 列头硬判**：若题面列头与 grader 实际接受的有偏差，会误判（已由 3 次熔断兜底）。
-4. **未跑过真模型**：本地模拟已覆盖原生 Claude 工具调用、取消和用量上报。官方 Docker 环境和真实模型仍待验证。
-5. **模型选择**：`submission.yaml` 现填 `google-cloud/claude-opus-5-5`。Claude 走
-   Anthropic 原生路径并显式打 `cache_control`（system + 最新消息），因为 dev 轨迹里
-   96% 的 prompt token 是 cached——不打就是每轮全价重付。
+4. **正式开发题评分**需要云端运行器获得 Hugging Face 题集读取权。已用真实 Gemma 模型完成官方 kit 合成任务和独立工程算例。[运行记录](docs/03-validation-methods.md)
+5. **模型选择**由 `submission.yaml` 声明，当前参赛配置为 `google-cloud/glm-5.2`。云端开发流程支持 GPT-6.1 Sol 和 HF 模型，使用本地量化 Gemma 时对适用的小型多文件任务启用首轮直接生成 Python。
 
 ## 下一步（按收益排序）
 

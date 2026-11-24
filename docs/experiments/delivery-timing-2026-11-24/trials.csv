@@ -1,0 +1,37 @@
+case,repeat,arm,score_at_395,cost_cents,output_files,accepted_patches,first_accepted_s,successful_call,file_writing_exec_return_s,failed_repair_errors,outcome
+p,1,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+p,1,native-actionable,1.0,80,2,2,299.624,4,334.27,TypeError: 'int' object is not subscriptable,files_graded
+p,2,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+p,2,native-actionable,1.0,80,2,2,317.222,9,380.05,TypeError: 'int' object is not subscriptable,files_graded
+p,3,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+p,3,native-actionable,1.0,80,2,2,299.155,4,332.98,TypeError: 'int' object is not subscriptable,files_graded
+q,1,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+q,1,native-actionable,0.0,,0,1,323.152,,,TypeError: 'int' object is not subscriptable,accepted_but_raised
+q,2,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+q,2,native-actionable,0.0,,0,1,337.672,,,TypeError: 'int' object is not subscriptable,accepted_but_raised
+q,3,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+q,3,native-actionable,1.0,54,2,2,296.403,9,380.9,TypeError: 'int' object is not subscriptable,files_graded
+r,1,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+r,1,native-actionable,0.0,,0,0,,,,,no_accepted_patch
+r,2,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+r,2,native-actionable,1.0,79,2,2,298.974,4,335.02,TypeError: 'int' object is not subscriptable,files_graded
+r,3,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+r,3,native-actionable,1.0,79,2,2,305.818,4,345.3,TypeError: 'int' object is not subscriptable,files_graded
+s,1,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+s,1,native-actionable,1.0,89,2,2,295.309,4,329.11,TypeError: 'int' object is not subscriptable,files_graded
+s,2,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+s,2,native-actionable,0.0,,0,1,294.906,,,TypeError: 'int' object is not subscriptable,accepted_but_raised
+s,3,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+s,3,native-actionable,1.0,89,2,2,297.837,4,333.75,TypeError: 'int' object is not subscriptable,files_graded
+t,1,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+t,1,native-actionable,0.0,,0,1,312.261,,,NameError: name 'p_vals' is not defined,accepted_but_raised
+t,2,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+t,2,native-actionable,0.0,,0,1,293.412,,,NameError: name 'p_vals' is not defined,accepted_but_raised
+t,3,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+t,3,native-actionable,0.0,,0,0,,,,,no_accepted_patch
+u,1,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+u,1,native-actionable,0.0,,0,1,294.103,,,NameError: name 'p_vals' is not defined,accepted_but_raised
+u,2,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+u,2,native-actionable,0.0,,0,1,293.442,,,NameError: name 'p_vals' is not defined,accepted_but_raised
+u,3,native-feedback,0.0,,0,0,,,,,no_accepted_patch
+u,3,native-actionable,0.0,,0,1,295.168,,,NameError: name 'p_vals' is not defined,accepted_but_raised

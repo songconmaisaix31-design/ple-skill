@@ -1,0 +1,120 @@
+{
+  "cases": {
+    "existing": {
+      "captured_files": 0,
+      "fixture_score": 0,
+      "guard": "PASS",
+      "probe_count": 1,
+      "prompt_accepted": 0,
+      "prompt_turns": []
+    },
+    "fixed": {
+      "captured_files": 1,
+      "fixture_score": 1,
+      "guard": "PASS",
+      "probe_count": 1,
+      "prompt_accepted": 1,
+      "prompt_turns": [
+        5
+      ],
+      "sha256": "c42282b5bb605bb8fae2b1165d7deb46f11299eed20d3837ea930a9d49cb17e2",
+      "values": {
+        "count": 3,
+        "total_kg": 199
+      }
+    },
+    "fixed_default_off": {
+      "captured_files": 1,
+      "fixture_score": 1,
+      "guard": "PASS",
+      "probe_count": 0,
+      "prompt_accepted": 0,
+      "prompt_turns": [],
+      "sha256": "c42282b5bb605bb8fae2b1165d7deb46f11299eed20d3837ea930a9d49cb17e2",
+      "values": {
+        "count": 3,
+        "total_kg": 199
+      }
+    },
+    "ignored": {
+      "captured_files": 0,
+      "fixture_score": 0,
+      "guard": "FAIL",
+      "probe_count": 1,
+      "prompt_accepted": 1,
+      "prompt_turns": [
+        5
+      ]
+    },
+    "model_rejection": {
+      "captured_files": 0,
+      "fixture_score": 0,
+      "guard": "FAIL",
+      "probe_count": 1,
+      "prompt_accepted": 0,
+      "prompt_turns": [
+        5
+      ]
+    },
+    "non_zip": {
+      "captured_files": 0,
+      "fixture_score": 0,
+      "guard": "FAIL",
+      "probe_count": 0,
+      "prompt_accepted": 0,
+      "prompt_turns": []
+    },
+    "probe_failure": {
+      "captured_files": 0,
+      "fixture_score": 0,
+      "guard": "FAIL",
+      "probe_count": 1,
+      "prompt_accepted": 0,
+      "prompt_turns": []
+    },
+    "respond": {
+      "capture_filename": "correct.zip",
+      "captured_files": 1,
+      "fixture_score": 1,
+      "guard": "PASS",
+      "probe_count": 1,
+      "prompt_accepted": 1,
+      "prompt_turns": [
+        5
+      ],
+      "sha256": "c42282b5bb605bb8fae2b1165d7deb46f11299eed20d3837ea930a9d49cb17e2",
+      "values": {
+        "count": 3,
+        "total_kg": 199
+      }
+    },
+    "respond_default_off": {
+      "captured_files": 0,
+      "fixture_score": 0,
+      "guard": "FAIL",
+      "probe_count": 0,
+      "prompt_accepted": 0,
+      "prompt_turns": []
+    },
+    "wrong_value": {
+      "capture_filename": "wrong-value.zip",
+      "captured_files": 1,
+      "fixture_score": 0,
+      "guard": "PASS",
+      "probe_count": 1,
+      "prompt_accepted": 1,
+      "prompt_turns": [
+        5
+      ],
+      "sha256": "2f312b9afb63bf42813086a6cca986c4345c82b6d47b41d550df5e10977c40d1",
+      "values": {
+        "count": 3,
+        "total_kg": 234
+      }
+    }
+  },
+  "kit_commit": "8320f0402fdca9f42476607f72bcfd5271cd50c9",
+  "matched_fixed_tool_history": true,
+  "model": "scripted",
+  "score_source": "local fixture on captured files"
+}

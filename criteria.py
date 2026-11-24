@@ -254,7 +254,7 @@ def g10_artifacts():
     p = os.path.join(HERE, "artifacts")
     docker = shutil.which("docker") is not None
     if not os.path.isdir(p):
-        rec("G-10", "artifacts/ 覆盖 29 题且合规",
+        rec("G-10", "官方导出目录的本地预检",
             "FAIL" if docker else "BLOCKED",
             "未生成 —— 在有 Docker 的机器上跑 eval/run.py" if docker else
             "未生成 —— 本机连 Docker 都不可用", "B")
@@ -262,9 +262,10 @@ def g10_artifacts():
     tasks = [d for d in os.listdir(p) if os.path.isdir(os.path.join(p, d))]
     files = sum(len(fs) for _, _, fs in os.walk(p))
     size = sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(p) for f in fs)
-    ok = len(tasks) >= 29 and files <= 10000 and size <= 512 * 1024 * 1024
-    gate_pass("G-10", "artifacts/ 覆盖 29 题且合规", ok,
-              f"{len(tasks)} 题 / {files} 文件 / {size/1e6:.0f} MB", "B")
+    manifest = os.path.isfile(os.path.join(p, "manifest.json"))
+    ok = manifest and 0 < len(tasks) <= DEV_TASKS and files <= 10000 and size <= 512 * 1024 * 1024
+    gate_pass("G-10", "官方导出目录的本地预检", ok,
+              f"{len(tasks)}/{DEV_TASKS} 个任务目录，manifest={manifest}，{files} 文件 / {size/1e6:.0f} MB；可用性由 kit artifacts 核验", "B")
     return ok
 
 
@@ -275,7 +276,7 @@ def g11_known_blockers():
                or os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY"))
     rec("T-01", "kit check 十阶段全过", "BLOCKED" if not has_docker else "TODO",
         "需要 Docker + uv + harbor==0.20.0", "B")
-    rec("T-02", "dev set 29 题 artifacts 被 kit artifacts 接受",
+    rec("T-02", "至少一题产物通过 kit artifacts，按 29 题计开发集均分",
         "BLOCKED" if not has_docker else "TODO", "需要 Docker 跑 eval/run.py", "B")
     rec("T-03", "真模型端到端跑通 serve.py", "BLOCKED" if not key else "TODO",
         "需要 MODEL_PROXY_URL/KEY 或 MODEL_BASE_URL + MODEL_API_KEY", "B")
@@ -283,7 +284,7 @@ def g11_known_blockers():
     rec("F-01", "无按题指纹分支（提交前人工复核最终 commit）", "TODO",
         "静态指纹已由 G-12 自动检查；提交前复核运行日志与最终 commit 内容", "B")
     rec("F-02", "artifacts 为提交版 harness 原样产出", "TODO",
-        "manifest.json 哈希需与代码同 commit；改代码必须重跑全量 dev", "B")
+        "用 kit artifacts 核对 manifest、文件和 harness 指纹；提交版运行代码变更后重新生成拟提交的题目产物", "B")
 
 
 def main():

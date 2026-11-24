@@ -1,0 +1,52 @@
+{
+  "default_off": {
+    "calls": 2,
+    "file_verified": false,
+    "successful_turns": 1
+  },
+  "inconsistent_counts": {
+    "calls": 2,
+    "file_verified": false,
+    "successful_turns": 1
+  },
+  "initial_rejection": {
+    "calls": 1,
+    "file_verified": false,
+    "successful_turns": 0
+  },
+  "later_rejection": {
+    "calls": 4,
+    "file_verified": false,
+    "successful_turns": 2
+  },
+  "message_only": {
+    "calls": 2,
+    "file_verified": false,
+    "successful_turns": 1
+  },
+  "recovery": {
+    "calls": 6,
+    "file_verified": true,
+    "successful_turns": 5
+  },
+  "second_rejection": {
+    "calls": 3,
+    "file_verified": false,
+    "successful_turns": 1
+  },
+  "truncated_body": {
+    "calls": 2,
+    "file_verified": false,
+    "successful_turns": 1
+  },
+  "unrelated_400": {
+    "calls": 2,
+    "file_verified": false,
+    "successful_turns": 1
+  },
+  "wrong_status": {
+    "calls": 2,
+    "file_verified": false,
+    "successful_turns": 1
+  }
+}

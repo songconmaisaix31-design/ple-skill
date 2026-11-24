@@ -1,0 +1,683 @@
+name: PLE cloud model pilot
+
+on:
+  push:
+    branches: [codex/ple-gpt-cloud-pilot]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ple-gpt-cloud-pilot
+  cancel-in-progress: false
+
+jobs:
+  pilot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      DIAGNOSE_GEMMA: ${{ github.event.head_commit.message == 'Diagnose official Gemma baseline' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate the declared model with the official kit
+        shell: bash
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          docker version >/dev/null
+          python3 -m venv "$RUNNER_TEMP/ple-bootstrap"
+          "$RUNNER_TEMP/ple-bootstrap/bin/python" -m pip install --disable-pip-version-check uv
+          echo "$RUNNER_TEMP/ple-bootstrap/bin" >> "$GITHUB_PATH"
+          export PATH="$RUNNER_TEMP/ple-bootstrap/bin:$PATH"
+          kit="$RUNNER_TEMP/ple-official"
+          git init -q "$kit"
+          git -C "$kit" fetch --depth 1 https://github.com/google-research/ple.git 8320f0402fdca9f42476607f72bcfd5271cd50c9
+          git -C "$kit" checkout -q --detach FETCH_HEAD
+          cd "$kit"
+          uv sync
+          uv run python -m kit validate "$GITHUB_WORKSPACE"
+          uv run python - "$GITHUB_WORKSPACE/submission.yaml" <<'PY'
+          import sys
+          from pathlib import Path
+          import yaml
+
+          entry = yaml.safe_load(Path(sys.argv[1]).read_text())
+          if entry["model_api"] != "google-cloud/glm-5.2":
+              raise SystemExit("This repository must declare the eligible GLM-5.2 model.")
+          PY
+
+      - name: Verify workbook inputs and optional Python actions
+        shell: bash
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          test_env="$RUNNER_TEMP/ple-workbook-test"
+          uv venv --python "$RUNNER_TEMP/ple-official/.venv/bin/python" "$test_env"
+          uv pip install --python "$test_env/bin/python" -r requirements.txt openpyxl==3.1.5
+          "$test_env/bin/python" devtools/workbook_regression.py
+          "$test_env/bin/python" devtools/code_action_regression.py
+
+      - name: Replay all frozen storage experiments from archived files
+        shell: bash
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          replay_experiment() {
+            local records="docs/experiments/$1" revision="$2" replay="$RUNNER_TEMP/$1"
+            mkdir -p "$replay"
+            python3 devtools/verify_paired_storage_evidence.py \
+              --archive "$records/evidence.zip" --protocol "$records/protocol.json" \
+              --expected-sha "$revision" --csv "$replay/trials.csv" --details "$replay/code-coverage.json"
+            python3 devtools/paired_storage_report.py "$replay/trials.csv" \
+              --protocol "$records/protocol.json" --output "$replay/summary.json"
+            python3 - "$records" "$replay" <<'PY'
+          import csv
+          import json
+          import sys
+          from pathlib import Path
+
+          saved, replay = map(Path, sys.argv[1:])
+          with (saved / "trials.csv").open(newline="") as a, (replay / "trials.csv").open(newline="") as b:
+              archived, rebuilt = csv.DictReader(a), csv.DictReader(b)
+              if archived.fieldnames != rebuilt.fieldnames or list(archived) != list(rebuilt):
+                  raise SystemExit(f"{saved.name}/trials.csv differs from the replay")
+          for name in ("summary.json", "code-coverage.json"):
+              if json.loads((saved / name).read_bytes()) != json.loads((replay / name).read_bytes()):
+                  raise SystemExit(f"{saved.name}/{name} differs from the replay")
+          PY
+          }
+          records=docs/experiments/repair-source-v1
+          python3 devtools/rebuild_repair_source_evidence.py \
+            --first "$records/attempts/attempt-1-evidence.zip" --retry "$records/attempts/attempt-2-evidence.zip" \
+            --protocol "$records/protocol.json" --output "$RUNNER_TEMP/rebuilt-repair-source.zip"
+          python3 - "$records/evidence.zip" "$RUNNER_TEMP/rebuilt-repair-source.zip" <<'PYCODE'
+          import sys
+          from zipfile import ZipFile
+          with ZipFile(sys.argv[1]) as saved, ZipFile(sys.argv[2]) as rebuilt:
+              if saved.namelist() != rebuilt.namelist() or any(saved.read(n) != rebuilt.read(n) for n in saved.namelist()):
+                  raise SystemExit("F/G evidence differs from the selected whole-pair attempts")
+          PYCODE
+          replay_experiment paired-storage-v1 52dc6b2f683dc5295529843530fe2ee4ea6e1c71
+          replay_experiment repair-source-v1 9c1a00a40c8e40212ea1e97c93824366889ddb8e
+
+          controlled=docs/experiments/controlled-repair-replay-v1
+          controlled_replay="$RUNNER_TEMP/controlled-repair-replay-v1"
+          mkdir -p "$controlled_replay"
+          python3 devtools/build_controlled_repair_evidence.py \
+            --protocol "$controlled/protocol.json" \
+            --job h:1:"$controlled/attempts/run-45247679226-h1-attempt2.zip" \
+            --job h:2:"$controlled/attempts/run-45247679226-h2.zip" \
+            --job h:3:"$controlled/attempts/run-45247679226-h3.zip" \
+            --job i:1:"$controlled/attempts/run-45247679226-i1.zip" \
+            --job i:2:"$controlled/attempts/run-45247679226-i2.zip" \
+            --job i:3:"$controlled/attempts/run-45246424026-i3.zip" \
+            --output "$controlled_replay/evidence.zip" \
+            --corrections "$controlled_replay/corrections.json"
+          cmp "$controlled/evidence.zip" "$controlled_replay/evidence.zip"
+          python3 devtools/verify_controlled_repair_evidence.py \
+            --archive "$controlled_replay/evidence.zip" \
+            --protocol "$controlled/protocol.json" \
+            --settings-protocol docs/experiments/repair-source-v1/protocol.json \
+            --expected-sha 55a02ad1bbd3f2afd6d29869e8797a9b879c51e0 \
+            --expected-sha de4be67625116a599f8c5d39d3eb10ed117db03c \
+            --csv "$controlled_replay/trials.csv" \
+            --details "$controlled_replay/code-coverage.json"
+          python3 devtools/controlled_repair_report.py "$controlled_replay/trials.csv" \
+            --output "$controlled_replay/summary.json"
+          python3 - "$controlled" "$controlled_replay" <<'PYCONTROLLED'
+          import csv
+          import json
+          import sys
+          from pathlib import Path
+
+          saved, replay = map(Path, sys.argv[1:])
+          with (saved / "trials.csv").open(newline="") as a, (replay / "trials.csv").open(newline="") as b:
+              archived, rebuilt = csv.DictReader(a), csv.DictReader(b)
+              if archived.fieldnames != rebuilt.fieldnames or list(archived) != list(rebuilt):
+                  raise SystemExit("controlled-repair-replay-v1/trials.csv differs from replay")
+          for name in ("summary.json", "code-coverage.json", "corrections.json"):
+              if json.loads((saved / name).read_bytes()) != json.loads((replay / name).read_bytes()):
+                  raise SystemExit(f"controlled-repair-replay-v1/{name} differs from replay")
+          PYCONTROLLED
+
+          constrained=docs/experiments/constrained-patch-v1
+          constrained_replay="$RUNNER_TEMP/constrained-patch-v1"
+          mkdir -p "$constrained_replay"
+          python3 devtools/build_constrained_patch_evidence.py \
+            --protocol "$constrained/protocol.json" \
+            --job j:1:"$constrained/attempts/run-45267026840-j1.zip" \
+            --job j:2:"$constrained/attempts/run-45267026840-j2.zip" \
+            --job j:3:"$constrained/attempts/run-45267026840-j3.zip" \
+            --job k:1:"$constrained/attempts/run-45267026840-k1.zip" \
+            --job k:2:"$constrained/attempts/run-45267026840-k2.zip" \
+            --job k:3:"$constrained/attempts/run-45267026840-k3.zip" \
+            --output "$constrained_replay/evidence.zip" \
+            --audit "$constrained_replay/attempts.json"
+          cmp "$constrained/evidence.zip" "$constrained_replay/evidence.zip"
+          python3 devtools/verify_constrained_patch_evidence.py \
+            --archive "$constrained_replay/evidence.zip" \
+            --protocol "$constrained/protocol.json" \
+            --settings-protocol docs/experiments/repair-source-v1/protocol.json \
+            --csv "$constrained_replay/trials.csv" \
+            --details "$constrained_replay/code-coverage.json"
+          python3 devtools/constrained_patch_report.py "$constrained_replay/trials.csv" \
+            --output "$constrained_replay/summary.json"
+          python3 - "$constrained" "$constrained_replay" <<'PYCONSTRAINED'
+          import csv
+          import json
+          import sys
+          from pathlib import Path
+
+          saved, replay = map(Path, sys.argv[1:])
+          with (saved / "trials.csv").open(newline="") as a, (replay / "trials.csv").open(newline="") as b:
+              archived, rebuilt = csv.DictReader(a), csv.DictReader(b)
+              if archived.fieldnames != rebuilt.fieldnames or list(archived) != list(rebuilt):
+                  raise SystemExit("constrained-patch-v1/trials.csv differs from replay")
+          for name in ("summary.json", "code-coverage.json"):
+              if json.loads((saved / name).read_bytes()) != json.loads((replay / name).read_bytes()):
+                  raise SystemExit(f"constrained-patch-v1/{name} differs from replay")
+          if json.loads((saved / "attempts/attempts.json").read_bytes()) != json.loads((replay / "attempts.json").read_bytes()):
+              raise SystemExit("constrained-patch-v1/attempts.json differs from replay")
+          PYCONSTRAINED
+
+          native=docs/experiments/native-patch-v1
+          native_replay="$RUNNER_TEMP/native-patch-v1"
+          mkdir -p "$native_replay"
+          python3 devtools/build_native_patch_evidence.py \
+            --protocol "$native/protocol.json" \
+            --job l:1:"$native/attempts/run-45278770683-l1-attempt-1.zip" \
+            --job l:2:"$native/attempts/run-45278770683-l2-attempt-1.zip" \
+            --job l:3:"$native/attempts/run-45278770683-l3-attempt-2.zip" \
+            --job m:1:"$native/attempts/run-45278770683-m1-attempt-1.zip" \
+            --job m:2:"$native/attempts/run-45278770683-m2-attempt-1.zip" \
+            --job m:3:"$native/attempts/run-45278770683-m3-attempt-1.zip" \
+            --output "$native_replay/evidence.zip" \
+            --audit "$native_replay/attempts.json"
+          cmp "$native/evidence.zip" "$native_replay/evidence.zip"
+          python3 devtools/verify_native_patch_evidence.py \
+            --archive "$native_replay/evidence.zip" \
+            --protocol "$native/protocol.json" \
+            --settings-protocol docs/experiments/repair-source-v1/protocol.json \
+            --csv "$native_replay/trials.csv" \
+            --details "$native_replay/code-coverage.json"
+          python3 devtools/native_patch_report.py "$native_replay/trials.csv" \
+            --output "$native_replay/summary.json"
+          python3 - "$native" "$native_replay" <<'PYNATIVE'
+          import csv
+          import json
+          import sys
+          from pathlib import Path
+
+          saved, replay = map(Path, sys.argv[1:])
+          with (saved / "trials.csv").open(newline="") as a, (replay / "trials.csv").open(newline="") as b:
+              archived, rebuilt = csv.DictReader(a), csv.DictReader(b)
+              if archived.fieldnames != rebuilt.fieldnames or list(archived) != list(rebuilt):
+                  raise SystemExit("native-patch-v1/trials.csv differs from replay")
+          for name in ("summary.json", "code-coverage.json"):
+              if json.loads((saved / name).read_bytes()) != json.loads((replay / name).read_bytes()):
+                  raise SystemExit(f"native-patch-v1/{name} differs from replay")
+          if json.loads((saved / "attempts/attempts.json").read_bytes()) != json.loads((replay / "attempts.json").read_bytes()):
+              raise SystemExit("native-patch-v1/attempts.json differs from replay")
+          PYNATIVE
+
+          feedback=docs/experiments/native-feedback-v1
+          feedback_replay="$RUNNER_TEMP/native-feedback-v1"
+          mkdir -p "$feedback_replay"
+          python3 devtools/build_native_feedback_evidence.py \
+            --protocol "$feedback/protocol.json" \
+            --job n:1:"$feedback/attempts/run-45303145848-n1-attempt-1.zip" \
+            --job n:2:"$feedback/attempts/run-45303145848-n2-attempt-2.zip" \
+            --job n:3:"$feedback/attempts/run-45303145848-n3-attempt-1.zip" \
+            --job o:1:"$feedback/attempts/run-45303145848-o1-attempt-1.zip" \
+            --job o:2:"$feedback/attempts/run-45303145848-o2-attempt-1.zip" \
+            --job o:3:"$feedback/attempts/run-45303145848-o3-attempt-1.zip" \
+            --output "$feedback_replay/evidence.zip" \
+            --audit "$feedback_replay/attempts.json"
+          cmp "$feedback/evidence.zip" "$feedback_replay/evidence.zip"
+          python3 devtools/verify_native_feedback_evidence.py \
+            --archive "$feedback_replay/evidence.zip" \
+            --protocol "$feedback/protocol.json" \
+            --settings-protocol docs/experiments/repair-source-v1/protocol.json \
+            --csv "$feedback_replay/trials.csv" \
+            --details "$feedback_replay/code-coverage.json"
+          python3 devtools/native_feedback_report.py "$feedback_replay/trials.csv" \
+            --output "$feedback_replay/summary.json"
+          python3 - "$feedback" "$feedback_replay" <<'PYFEEDBACK'
+          import csv
+          import json
+          import sys
+          from pathlib import Path
+
+          saved, replay = map(Path, sys.argv[1:])
+          with (saved / "trials.csv").open(newline="") as a, (replay / "trials.csv").open(newline="") as b:
+              archived, rebuilt = csv.DictReader(a), csv.DictReader(b)
+              if archived.fieldnames != rebuilt.fieldnames or list(archived) != list(rebuilt):
+                  raise SystemExit("native-feedback-v1/trials.csv differs from replay")
+          for name in ("summary.json", "code-coverage.json"):
+              if json.loads((saved / name).read_bytes()) != json.loads((replay / name).read_bytes()):
+                  raise SystemExit(f"native-feedback-v1/{name} differs from replay")
+          if json.loads((saved / "attempts/attempts.json").read_bytes()) != json.loads((replay / "attempts.json").read_bytes()):
+              raise SystemExit("native-feedback-v1/attempts.json differs from replay")
+          PYFEEDBACK
+
+      - name: Exchange the authorized runner identity for a temporary Hugging Face token
+        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' || github.event.head_commit.message == 'Diagnose official Gemma baseline' }}
+        shell: bash
+        run: |
+          umask 077
+          cat > "$RUNNER_TEMP/ple-hf-oidc-refresh" <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          umask 077
+          unset HF_TOKEN HUGGING_FACE_HUB_TOKEN HF_OIDC_ID_TOKEN OPENAI_API_KEY MODEL_PROXY_KEY
+          export HF_HOME="$RUNNER_TEMP/ple-hf-oidc-home"
+          export HF_ENDPOINT=https://huggingface.co HF_OIDC_RESOURCE=DWaaaa
+          if ! token=$(timeout 45 "$RUNNER_TEMP/ple-official/.venv/bin/hf" auth token 2>"$RUNNER_TEMP/ple-hf-oidc-error"); then
+            if grep -qiE 'invalid_grant|no matching (trusted )?publisher' "$RUNNER_TEMP/ple-hf-oidc-error"; then
+              echo 'Hugging Face rejected the runner identity (invalid_grant).'
+            else
+              echo 'The Hugging Face CLI could not exchange this runner identity.'
+            fi
+            request_id=$(grep -m1 -oE '\(Request ID: (Root=)?[A-Fa-f0-9-]{16,80}\)' "$RUNNER_TEMP/ple-hf-oidc-error" || true)
+            if [[ -n "$request_id" ]]; then printf '%s\n' "$request_id"; fi
+            exit 1
+          fi
+          [[ "$token" =~ ^hf_[A-Za-z0-9._-]+$ ]]
+          printf '::add-mask::%s\n' "$token"
+          printf '%s\n' "$token" > "$RUNNER_TEMP/ple-hf-oidc-token.new"
+          mv "$RUNNER_TEMP/ple-hf-oidc-token.new" "$RUNNER_TEMP/ple-hf-oidc-token"
+          BASH
+          chmod 700 "$RUNNER_TEMP/ple-hf-oidc-refresh"
+          if "$RUNNER_TEMP/ple-hf-oidc-refresh"; then
+            echo 'Temporary Hugging Face runner identity authorized.'
+          else
+            echo 'Hugging Face runner identity unavailable. Existing secrets or device login remain available.'
+          fi
+
+      - name: Check existing Hugging Face dataset credentials
+        id: hf_credential
+        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' || github.event.head_commit.message == 'Diagnose official Gemma baseline' }}
+        shell: bash
+        env:
+          PLE_HF_CONFIGURED_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN HF_TOKEN HUGGING_FACE_HUB_TOKEN HF_OIDC_ID_TOKEN HF_OIDC_RESOURCE
+          if selection=$(timeout 75 "$RUNNER_TEMP/ple-official/.venv/bin/python" \
+              devtools/hf_dataset_credential.py "$RUNNER_TEMP/ple-hf-oidc-token" 2>/dev/null) &&
+             [[ "$selection" =~ ^source=(secret|oidc|none)$'\n'state=(verified|absent|rejected|unavailable)$ ]]; then
+            printf '%s\n' "$selection" >> "$GITHUB_OUTPUT"
+          else
+            printf 'source=none\nstate=unavailable\n' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare Hugging Face device authorization for this runner
+        id: hf_device
+        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' && steps.hf_credential.outputs.source == 'none' }}
+        shell: bash
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN HF_TOKEN HUGGING_FACE_HUB_TOKEN HF_OIDC_ID_TOKEN HF_OIDC_RESOURCE
+          umask 077
+          export HF_HOME="$RUNNER_TEMP/ple-hf-home" HF_ENDPOINT=https://huggingface.co
+          state="$RUNNER_TEMP/ple-hf-auth"
+          nohup python3 devtools/hf_cloud_device.py \
+            --hf "$RUNNER_TEMP/ple-official/.venv/bin/hf" --state "$state" \
+            --public-key devtools/hf_cloud_session_public.pem \
+            </dev/null >"$RUNNER_TEMP/ple-hf-device.log" 2>&1 &
+          for _ in {1..25}; do
+            if [[ -s "$state/challenge.bin" || -f "$state/status" ]]; then break; fi
+            sleep 1
+          done
+          if [[ ! -s "$state/challenge.bin" ]]; then
+            echo 'Hugging Face CLI did not start device authorization.'
+            exit 1
+          fi
+          echo 'started=true' >> "$GITHUB_OUTPUT"
+
+      - name: Make the encrypted device challenge available
+        if: steps.hf_device.outputs.started == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ple-hf-device-challenge
+          path: ${{ runner.temp }}/ple-hf-auth/challenge.bin
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Wait for the selected Hugging Face account
+        if: steps.hf_device.outputs.started == 'true'
+        shell: bash
+        run: |
+          state="$RUNNER_TEMP/ple-hf-auth/status"
+          for _ in {1..64}; do
+            if [[ -s "$state" ]]; then break; fi
+            sleep 5
+          done
+          if [[ ! -s "$state" || "$(cat "$state")" != authenticated ]]; then
+            echo 'Hugging Face device authorization did not complete.'
+            exit 1
+          fi
+
+      - name: Verify and download the official checks-only task
+        id: dataset_access
+        if: ${{ github.event.head_commit.message == 'Start authorized cloud model pilot' || github.event.head_commit.message == 'Run authorized PLE pilot' || github.event.head_commit.message == 'Diagnose official Gemma baseline' }}
+        shell: bash
+        env:
+          PLE_HF_CONFIGURED_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
+          PLE_HF_CREDENTIAL_SOURCE: ${{ steps.hf_credential.outputs.source }}
+          PLE_HF_CREDENTIAL_STATE: ${{ steps.hf_credential.outputs.state }}
+          HF_HUB_DISABLE_TELEMETRY: '1'
+          HF_HUB_DISABLE_PROGRESS_BARS: '1'
+          PLE_UNATTENDED: ${{ github.event.head_commit.message == 'Run authorized PLE pilot' || github.event.head_commit.message == 'Diagnose official Gemma baseline' }}
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN HF_TOKEN HUGGING_FACE_HUB_TOKEN HF_OIDC_ID_TOKEN HF_OIDC_RESOURCE
+          export HF_ENDPOINT=https://huggingface.co
+          case "$PLE_HF_CREDENTIAL_SOURCE" in
+            secret) HF_TOKEN=$PLE_HF_CONFIGURED_TOKEN ;;
+            oidc) HF_TOKEN=$(cat "$RUNNER_TEMP/ple-hf-oidc-token") ;;
+            none)
+              if [[ "$PLE_UNATTENDED" != true && -s "$RUNNER_TEMP/ple-hf-home/token" ]]; then
+                HF_TOKEN=$(cat "$RUNNER_TEMP/ple-hf-home/token")
+              fi
+              ;;
+          esac
+          unset PLE_HF_CONFIGURED_TOKEN
+          if [[ -z "${HF_TOKEN:-}" ]]; then
+            case "$PLE_HF_CREDENTIAL_STATE" in
+              absent) problem='No Hugging Face dataset credential is available.' ;;
+              rejected) problem='Hugging Face denied dataset access for the available credential(s) (HTTP 401 or 403).' ;;
+              *) problem='Hugging Face dataset access could not be verified.' ;;
+            esac
+            printf 'Official task not run. %s\n' "$problem" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          export HF_TOKEN
+
+          cd "$RUNNER_TEMP/ple-official"
+          task_dir="$RUNNER_TEMP/ple-official-task"
+          uv run python - "$task_dir" <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          import sys
+          import time
+
+          from huggingface_hub import HfApi, snapshot_download
+          from huggingface_hub.errors import HfHubHTTPError
+
+          token = os.environ["HF_TOKEN"]
+          api = HfApi(token=token)
+          repo = "google/physical-engineerings-last-exam"
+          attempts = 1 if os.environ["PLE_UNATTENDED"] == "true" else 21
+          for attempt in range(attempts):
+              try:
+                  api.auth_check(repo, repo_type="dataset")
+              except HfHubHTTPError as exc:
+                  status = getattr(exc.response, "status_code", None)
+                  if status != 403 or attempt + 1 == attempts:
+                      raise SystemExit(f"Hugging Face dataset permission check failed (HTTP {status}).") from None
+                  if attempt == 0:
+                      print("Hugging Face login succeeded. Waiting for the separate PLE dataset grant (HTTP 403).", flush=True)
+                  time.sleep(15)
+              except Exception:
+                  raise SystemExit("Hugging Face dataset permission check could not complete.") from None
+              else:
+                  break
+          print("Hugging Face dataset access verified.")
+          try:
+              revision = ("e0c21fa558c3127785656398e3b3bd7da5e5a5a6" if os.environ["DIAGNOSE_GEMMA"] == "true"
+                          else api.dataset_info(repo, revision="main").sha or "")
+              if not re.fullmatch(r"[a-f0-9]{40}", revision):
+                  raise RuntimeError("Invalid dataset revision")
+              snapshot_download(repo, repo_type="dataset", revision=revision,
+                                allow_patterns=["tasks/wind-diaphragm-shear/**"], local_dir=sys.argv[1], token=token)
+          except HfHubHTTPError as exc:
+              status = getattr(exc.response, "status_code", None)
+              raise SystemExit(f"Official task download failed (HTTP {status}).") from None
+          except Exception:
+              raise SystemExit("Official task download failed.") from None
+          if not (Path(sys.argv[1]) / "tasks/wind-diaphragm-shear/task.toml").is_file():
+              raise SystemExit("Official task download was incomplete.")
+          print(f"Downloaded the official task at dataset revision {revision[:12]}.")
+          PY
+          unset HF_TOKEN
+          printf 'PLE_TASKS_DIR=%s\n' "$task_dir/tasks" >> "$GITHUB_ENV"
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+
+      - name: Check the configured hosted models
+        id: hosted_model
+        if: steps.dataset_access.outputs.ready == 'true' && env.DIAGNOSE_GEMMA != 'true'
+        shell: bash
+        env:
+          PLE_OPENAI_API_KEY: ${{ secrets.PLE_OPENAI_API_KEY }}
+          PLE_HF_INFERENCE_TOKEN: ${{ secrets.PLE_HF_INFERENCE_TOKEN }}
+          PLE_HF_LEGACY_TOKEN: ${{ secrets.PLE_HF_TOKEN }}
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          python="$RUNNER_TEMP/ple-official/.venv/bin/python"
+          if [[ -n "$PLE_OPENAI_API_KEY" ]] && \
+             env -u PLE_OPENAI_API_KEY -u PLE_HF_INFERENCE_TOKEN -u PLE_HF_LEGACY_TOKEN \
+             MODEL_API=openai/gpt-6.1-sol MODEL_NAME=gpt-6.1-sol \
+             MODEL_BASE_URL=https://api.openai.com/v1 MODEL_API_KEY="$PLE_OPENAI_API_KEY" \
+             "$python" -m devtools.cloud_model_probe; then
+            echo 'model_api=openai/gpt-6.1-sol' >> "$GITHUB_OUTPUT"
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          oidc_file="$RUNNER_TEMP/ple-hf-oidc-token"
+          uses_oidc=false
+          if [[ -z "$PLE_HF_INFERENCE_TOKEN" && -s "$oidc_file" ]]; then
+            export PLE_HF_INFERENCE_TOKEN_FILE="$oidc_file"
+            uses_oidc=true
+          elif [[ -z "$PLE_HF_INFERENCE_TOKEN" && -n "$PLE_HF_LEGACY_TOKEN" ]]; then
+            export PLE_HF_INFERENCE_TOKEN="$PLE_HF_LEGACY_TOKEN"
+          elif [[ -z "$PLE_HF_INFERENCE_TOKEN" ]]; then
+            echo 'No hosted model credential is available. Checking local CPU models.' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          umask 077
+          export MODEL_PROXY_URL=http://127.0.0.1:4101
+          MODEL_PROXY_KEY=$(openssl rand -hex 24)
+          export MODEL_PROXY_KEY
+          printf '::add-mask::%s\n' "$MODEL_PROXY_KEY"
+          env -u PLE_OPENAI_API_KEY -u PLE_HF_LEGACY_TOKEN nohup python3 devtools/gpt_cloud_relay.py \
+            </dev/null >"$RUNNER_TEMP/ple-relay.log" 2>&1 &
+          relay_pid=$!
+          unset PLE_OPENAI_API_KEY PLE_HF_INFERENCE_TOKEN PLE_HF_INFERENCE_TOKEN_FILE PLE_HF_LEGACY_TOKEN
+          if curl --max-time 5 --fail --silent --retry 8 --retry-connrefused --retry-delay 1 "$MODEL_PROXY_URL/ready" >/dev/null && \
+             MODEL_API=google-cloud/glm-5.2 MODEL_NAME=glm-5.2 \
+             MODEL_BASE_URL="$MODEL_PROXY_URL/v1" MODEL_API_KEY="$MODEL_PROXY_KEY" \
+             "$python" -m devtools.cloud_model_probe; then
+            printf '%s\n' "$relay_pid" > "$RUNNER_TEMP/ple-relay.pid"
+            printf 'MODEL_PROXY_URL=%s\nMODEL_PROXY_KEY=%s\n' "$MODEL_PROXY_URL" "$MODEL_PROXY_KEY" >> "$GITHUB_ENV"
+            printf 'model_api=google-cloud/glm-5.2\nready=true\nuses_oidc=%s\n' "$uses_oidc" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          kill "$relay_pid" 2>/dev/null || true
+          echo 'Hosted inference could not be verified. Checking local CPU models.' | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Start an account-free CPU model
+        id: cpu_model
+        if: ${{ !cancelled() && steps.dataset_access.outputs.ready == 'true' && steps.hosted_model.outputs.ready != 'true' }}
+        shell: bash
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN HF_HOME HF_TOKEN HUGGING_FACE_HUB_TOKEN
+          umask 077
+          export MODEL_PROXY_URL=http://127.0.0.1:4102
+          export PLE_CPU_STATE="$RUNNER_TEMP/ple-cpu"
+          MODEL_PROXY_KEY=$(openssl rand -hex 24)
+          export MODEL_PROXY_KEY
+          printf '::add-mask::%s\n' "$MODEL_PROXY_KEY"
+          python="$RUNNER_TEMP/ple-official/.venv/bin/python"
+          profiles=(gemma26 granite)
+          if [[ "$DIAGNOSE_GEMMA" == true ]]; then profiles=(gemma26); fi
+          for profile in "${profiles[@]}"; do
+            export PLE_CPU_EVAL_GREEDY=false
+            if [[ "$profile" == gemma26 ]]; then export PLE_CPU_EVAL_GREEDY=true; fi
+            if bash devtools/start_cpu_model.sh "$profile"; then
+              source "$PLE_CPU_STATE/model.env"
+              if MODEL_API="$PLE_CPU_MODEL_API" MODEL_NAME="$PLE_CPU_MODEL_NAME" \
+                 MODEL_BASE_URL="$MODEL_PROXY_URL/v1" MODEL_API_KEY="$MODEL_PROXY_KEY" \
+                 "$python" -m devtools.cloud_model_probe; then
+                printf 'MODEL_PROXY_URL=%s\nMODEL_PROXY_KEY=%s\n' "$MODEL_PROXY_URL" "$MODEL_PROXY_KEY" >> "$GITHUB_ENV"
+                printf 'model_api=%s\nready=true\n' "$PLE_CPU_MODEL_API" >> "$GITHUB_OUTPUT"
+                if [[ "$PLE_CPU_MODEL_API" == openai-compatible/* ]]; then
+                  echo 'Using the Granite CPU model for development scoring only.' | tee -a "$GITHUB_STEP_SUMMARY"
+                else
+                  echo 'Using a local quantized Gemma model for this development run.' | tee -a "$GITHUB_STEP_SUMMARY"
+                fi
+                exit 0
+              fi
+              kill "$(cat "$PLE_CPU_STATE/server.pid")" 2>/dev/null || true
+              for _ in {1..10}; do
+                if ! curl --max-time 1 --silent "$MODEL_PROXY_URL/health" >/dev/null; then break; fi
+                sleep 1
+              done
+            fi
+            if [[ "$profile" == gemma26 ]]; then
+              rm -f "$PLE_CPU_STATE/gemma-4-26B-A4B-it-UD-IQ2_XXS.gguf"
+            fi
+          done
+          echo 'Official task not run. Neither CPU model passed the function-call probe.' | tee -a "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Validate the selected evaluation entry
+        id: entry_preparation
+        if: steps.hosted_model.outputs.ready == 'true' || steps.cpu_model.outputs.ready == 'true'
+        shell: bash
+        env:
+          PLE_MODEL_API: ${{ steps.hosted_model.outputs.model_api || steps.cpu_model.outputs.model_api }}
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          entry="$GITHUB_WORKSPACE"
+          case "$PLE_MODEL_API" in
+            openai/gpt-6.1-sol|google-cloud/gemma-4-26b|openai-compatible/granite-4.1-3b)
+              entry="$RUNNER_TEMP/ple-model-entry"
+              git clone --quiet "$GITHUB_WORKSPACE" "$entry"
+              "$RUNNER_TEMP/ple-official/.venv/bin/python" - "$entry/submission.yaml" "$PLE_MODEL_API" <<'PY'
+          import sys
+          from pathlib import Path
+          import yaml
+
+          path, model = Path(sys.argv[1]), sys.argv[2]
+          config = yaml.safe_load(path.read_text())
+          config["model_api"] = model
+          if model == "google-cloud/gemma-4-26b":
+              config.setdefault("env", {})["PLE_CODE_ACTION"] = "text"
+          elif model.startswith("openai-compatible/"):
+              config["model_base_url"] = "https://llm.example.org/v1"
+          path.write_text(yaml.safe_dump(config, sort_keys=False))
+          PY
+              git -C "$entry" add submission.yaml
+              git -C "$entry" -c user.name='PLE Cloud Pilot' -c user.email='pilot@users.noreply.github.com' \
+                commit --quiet -m 'Select the model for this development run'
+              ;;
+            google-cloud/glm-5.2) ;;
+            *) echo 'Unexpected pilot model.'; exit 1 ;;
+          esac
+          printf 'PLE_EVAL_ENTRY=%s\nPLE_EVAL_MODEL_API=%s\n' "$entry" "$PLE_MODEL_API" >> "$GITHUB_ENV"
+          cd "$RUNNER_TEMP/ple-official"
+          uv run python -m kit validate "$entry"
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+
+      - name: Run and score one official checks-only task
+        if: steps.entry_preparation.outputs.ready == 'true'
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ steps.hosted_model.outputs.model_api == 'openai/gpt-6.1-sol' && secrets.PLE_OPENAI_API_KEY || '' }}
+          HF_HUB_DISABLE_TELEMETRY: '1'
+          PLE_REFRESH_HF_OIDC: ${{ steps.hosted_model.outputs.uses_oidc == 'true' }}
+        run: |
+          if [[ "$PLE_REFRESH_HF_OIDC" == true ]]; then
+            (
+              while sleep 2400; do
+                until "$RUNNER_TEMP/ple-hf-oidc-refresh"; do
+                  echo 'Temporary Hugging Face credential renewal failed; retrying shortly.'
+                  sleep 60
+                done
+              done
+            ) &
+            renewal_pid=$!
+            trap 'kill "$renewal_pid" 2>/dev/null || true' EXIT
+          fi
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN HF_HOME HF_TOKEN
+          cd "$RUNNER_TEMP/ple-official"
+          export UV_TOOL_BIN_DIR="$RUNNER_TEMP/ple-bin"
+          mkdir -p "$UV_TOOL_BIN_DIR"
+          export PATH="$UV_TOOL_BIN_DIR:$PATH"
+          env -u OPENAI_API_KEY -u MODEL_PROXY_KEY uv tool install harbor==0.20.0 --with websockets
+          model_args=()
+          if [[ "$PLE_EVAL_MODEL_API" == openai-compatible/* ]]; then
+            model_args=(--model-base-url "$MODEL_PROXY_URL/v1")
+            export MODEL_API_KEY="$MODEL_PROXY_KEY"
+            unset MODEL_PROXY_URL MODEL_PROXY_KEY
+          fi
+          out="$RUNNER_TEMP/ple-pilot"
+          log="$RUNNER_TEMP/ple-pilot.log"
+          status=0
+          uv run python eval/run.py "$PLE_EVAL_ENTRY" --tasks wind-diaphragm-shear \
+            --tasks-dir "$PLE_TASKS_DIR" --trials 1 --attempts 1 --no-export --out "$out" \
+            "${model_args[@]}" >"$log" 2>&1 || status=$?
+
+          if [[ "$DIAGNOSE_GEMMA" == true ]]; then
+            python3 "$GITHUB_WORKSPACE/devtools/official_trial_diagnostic.py" "$out" "$log" "$status" \
+              "$RUNNER_TEMP/ple-official-diagnostic.json"
+            cat "$RUNNER_TEMP/ple-official-diagnostic.json"
+          fi
+          python3 - "$out/results.json" "$log" "$status" "$PLE_EVAL_MODEL_API" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json
+          import math
+          import sys
+          from pathlib import Path
+
+          result_path, log_path, exit_status, expected_model = sys.argv[1:]
+          if not Path(result_path).is_file():
+              log = Path(log_path).read_text(errors="replace").lower()
+              if "no space left" in log:
+                  issue = "runner disk exhausted"
+              elif "docker failed" in log or "docker daemon" in log:
+                  issue = "Docker setup failed"
+              elif "401 client error" in log or "403 client error" in log or "gated repo" in log:
+                  issue = "dataset download was refused"
+              else:
+                  issue = "official evaluator stopped before writing results"
+              print(f"wind-diaphragm-shear: unmeasured ({issue}; exit {exit_status}).")
+              raise SystemExit(1)
+          result = json.loads(Path(result_path).read_text())
+          if result.get("model") != expected_model:
+              raise SystemExit("Evaluation report has an unexpected model ID.")
+          task = next((row for row in result["tasks"] if row["id"] == "wind-diaphragm-shear"), None)
+          if not task or not task.get("measured"):
+              print("wind-diaphragm-shear: official evaluator did not measure a score.")
+              raise SystemExit(1)
+          score = float(task["score"])
+          if not math.isfinite(score) or not 0 <= score <= 1:
+              raise SystemExit("Evaluation report has an invalid score.")
+          print(f"wind-diaphragm-shear: measured, normalized score {score:.6f} / 1.000000.")
+          if exit_status != "0":
+              print(f"Official evaluator exited {exit_status} after recording the score.")
+              raise SystemExit(1)
+          PY
+
+      - name: Archive numerical pilot diagnostics
+        if: ${{ always() && env.DIAGNOSE_GEMMA == 'true' && steps.entry_preparation.outputs.ready == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ple-official-gemma-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ple-official-diagnostic.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Stop local model processes
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          for pid_file in "$RUNNER_TEMP/ple-relay.pid" "$RUNNER_TEMP/ple-cpu/server.pid"; do
+            if [[ -s "$pid_file" ]]; then kill "$(cat "$pid_file")" 2>/dev/null || true; fi
+          done

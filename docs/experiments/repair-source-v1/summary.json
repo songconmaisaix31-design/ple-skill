@@ -1,0 +1,149 @@
+{
+  "cases": [
+    "f",
+    "g"
+  ],
+  "seed": 17,
+  "declared_budget_sec": 720,
+  "snapshot_sec": 395,
+  "complete": true,
+  "missing_rows": [],
+  "unmeasured_rows": [],
+  "counts_by_arm": {
+    "text": {
+      "planned": 6,
+      "measured": 6,
+      "feasible": 6,
+      "optimal": 6,
+      "repair_requests": 0,
+      "source_exposures": 0,
+      "unknown_exposures": 0,
+      "exported_nonempty_files": 12,
+      "trials_with_both_files": 6
+    },
+    "text-source": {
+      "planned": 6,
+      "measured": 6,
+      "feasible": 6,
+      "optimal": 6,
+      "repair_requests": 0,
+      "source_exposures": 0,
+      "unknown_exposures": 0,
+      "exported_nonempty_files": 12,
+      "trials_with_both_files": 6
+    }
+  },
+  "paired_results_by_case": {
+    "f": {
+      "planned_pairs": 3,
+      "measured_pairs": 3,
+      "measured_by_arm": {
+        "text": 3,
+        "text-source": 3
+      },
+      "wins": 0,
+      "ties": 3,
+      "losses": 0,
+      "mean_paired_difference": 0.0,
+      "pairs": [
+        {
+          "repeat": 1,
+          "text": 1.0,
+          "text-source": 1.0,
+          "text_source_minus_text": 0.0
+        },
+        {
+          "repeat": 2,
+          "text": 1.0,
+          "text-source": 1.0,
+          "text_source_minus_text": 0.0
+        },
+        {
+          "repeat": 3,
+          "text": 1.0,
+          "text-source": 1.0,
+          "text_source_minus_text": 0.0
+        }
+      ]
+    },
+    "g": {
+      "planned_pairs": 3,
+      "measured_pairs": 3,
+      "measured_by_arm": {
+        "text": 3,
+        "text-source": 3
+      },
+      "wins": 0,
+      "ties": 3,
+      "losses": 0,
+      "mean_paired_difference": 0.0,
+      "pairs": [
+        {
+          "repeat": 1,
+          "text": 1.0,
+          "text-source": 1.0,
+          "text_source_minus_text": 0.0
+        },
+        {
+          "repeat": 2,
+          "text": 1.0,
+          "text-source": 1.0,
+          "text_source_minus_text": 0.0
+        },
+        {
+          "repeat": 3,
+          "text": 1.0,
+          "text-source": 1.0,
+          "text_source_minus_text": 0.0
+        }
+      ]
+    }
+  },
+  "case_macro_score_by_repeat": [
+    {
+      "repeat": 1,
+      "text": 1.0,
+      "text-source": 1.0,
+      "text_source_minus_text": 0.0
+    },
+    {
+      "repeat": 2,
+      "text": 1.0,
+      "text-source": 1.0,
+      "text_source_minus_text": 0.0
+    },
+    {
+      "repeat": 3,
+      "text": 1.0,
+      "text-source": 1.0,
+      "text_source_minus_text": 0.0
+    }
+  ],
+  "across_repeat_statistics": {
+    "text": {
+      "n": 3,
+      "mean": 1.0,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    },
+    "text-source": {
+      "n": 3,
+      "mean": 1.0,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    },
+    "text_source_minus_text": {
+      "n": 3,
+      "mean": 0.0,
+      "sample_variance": 0.0,
+      "sample_std": 0.0
+    }
+  },
+  "registered_decision": "inconclusive_no_exposure",
+  "registered_rule": {
+    "positive_same_family": "All six pairs measured, at least one candidate trial exposed, neither case has a negative mean paired change, and each of the three repeat-level macro paired differences is strictly positive. Expand evaluation on new inputs only under these conditions.",
+    "otherwise": "If the design is complete and exposed but these criteria fail, retain the existing text baseline. Any missing pair or no candidate repair exposure is insufficient evidence.",
+    "official": "Evaluate official PLE independently. No official score or broad promotion follows from this two-case study."
+  },
+  "interpretation": "The mean and sample variance (n-1 denominator) describe repetition-level case averages at one fixed seed. A tied observed difference supplies no evidence of superiority. An equivalence claim would require a separately specified equivalence margin and test."
+}

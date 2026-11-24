@@ -14,8 +14,7 @@
 并在 hidden test 的 3 次评分里至少完成一次完整评分、不因工程问题（构建失败 / 未监听 / 超时
 不 `done`）拿 0 分。
 
-目标不是"赢"，是**先把 0 分风险全部消掉**，再谈分数。这个比赛里 3 次提交机会、约 1 天/次评测，
-一次 build 或 smoke 失败就直接终止，所以门槛优先于优化。
+目标不是"赢"，是**先把 0 分风险全部消掉**，再谈分数。先用官方套件验证产物和容器，再提交 Kaggle Writeup。
 
 ---
 
@@ -46,9 +45,9 @@
 
 | ID | 判据 | 怎么验证 | 当前 |
 |---|---|---|---|
-| G-10 | `artifacts/` 覆盖 29 题，≤512 MiB，≤10000 文件，无 archive、无 LFS | `python3 -m kit artifacts <repo>` | BLOCKED |
+| G-10 | `artifacts/` 至少一题可用；全量覆盖为质量目标；大小、文件数量与归档格式由官方套件核对 | `python3 -m kit artifacts <repo>` | BLOCKED |
 | T-01 | `kit check` 八个阶段（submission.yaml / files / .env / build / model / listen / smoke / cancel）全 PASS | `uv run python -m kit check <repo> --cancel-test` | BLOCKED |
-| T-02 | dev set 跑完，`eval/run.py` 为 29 题写出可用 artifacts | `uv run python eval/run.py <repo>` | BLOCKED |
+| T-02 | 官方导出与重评通过，报告实际覆盖及 29 题均分 | `uv run python eval/run.py <repo>` | BLOCKED |
 | T-03 | 真模型端到端：`serve.py` 连上 `MODEL_BASE_URL`，单题跑完并发 `done` | 起本地 evaluator 或 `kit check` 的 smoke | BLOCKED |
 | T-04 | dev 分数 ≥ baseline 参照（同题同判据下的 baseline 产出） | `eval/run.py --artifacts` | TODO |
 | F-01 | 无按题指纹分支：不出现"若 instruction 含 X 则输出答案"这类以 task 身份为条件的逻辑 | 人工复核 + `grep` 变量名 | TODO |

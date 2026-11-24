@@ -1,0 +1,112 @@
+{
+  "planned": 12,
+  "regraded": 12,
+  "missing_arms": 0,
+  "complete_transcripts": 12,
+  "git_sha": "9c1a00a40c8e40212ea1e97c93824366889ddb8e",
+  "verified_candidate_exposures": 0,
+  "programs": {
+    "f/1/text": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "ad2735f2980c6571abb162d7e93717c072fe255f910ff22f872ee318c0558ade",
+        "parseable": true
+      }
+    ],
+    "f/1/text-source": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "ad2735f2980c6571abb162d7e93717c072fe255f910ff22f872ee318c0558ade",
+        "parseable": true
+      }
+    ],
+    "f/2/text": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "30bb3714406317956d8edb5c6b823fad3fa288a6e1b1b0701b7c29c7ef83fcf4",
+        "parseable": true
+      }
+    ],
+    "f/2/text-source": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "30bb3714406317956d8edb5c6b823fad3fa288a6e1b1b0701b7c29c7ef83fcf4",
+        "parseable": true
+      }
+    ],
+    "f/3/text": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "ad2735f2980c6571abb162d7e93717c072fe255f910ff22f872ee318c0558ade",
+        "parseable": true
+      }
+    ],
+    "f/3/text-source": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "ad2735f2980c6571abb162d7e93717c072fe255f910ff22f872ee318c0558ade",
+        "parseable": true
+      }
+    ],
+    "g/1/text": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "ee0ad336b7d96c98aa80f86adc805a70c9673b111628579a7ad84396abb962a1",
+        "parseable": true
+      }
+    ],
+    "g/1/text-source": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "ee0ad336b7d96c98aa80f86adc805a70c9673b111628579a7ad84396abb962a1",
+        "parseable": true
+      }
+    ],
+    "g/2/text": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "de75b26f86b4eb1cef5cab8cc7ebf0eeb382140b537e473c6ba41d421d87bec0",
+        "parseable": true
+      },
+      {
+        "call": 2,
+        "interface": "run_python",
+        "source_sha256": "2a3f34ce7e4fba7af37fc9874a58e20770252abb497fb7afbdfe07a3825527c0",
+        "parseable": true
+      }
+    ],
+    "g/2/text-source": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "de75b26f86b4eb1cef5cab8cc7ebf0eeb382140b537e473c6ba41d421d87bec0",
+        "parseable": true
+      }
+    ],
+    "g/3/text": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "ee0ad336b7d96c98aa80f86adc805a70c9673b111628579a7ad84396abb962a1",
+        "parseable": true
+      }
+    ],
+    "g/3/text-source": [
+      {
+        "call": 1,
+        "interface": "text-first",
+        "source_sha256": "ee0ad336b7d96c98aa80f86adc805a70c9673b111628579a7ad84396abb962a1",
+        "parseable": true
+      }
+    ]
+  }
+}

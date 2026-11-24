@@ -1,0 +1,41 @@
+{
+  "task": "wind-diaphragm-shear",
+  "model": "google-cloud/gemma-4-26b",
+  "kit_sha": "8320f0402fdca9f42476607f72bcfd5271cd50c9",
+  "dataset_sha": "e0c21fa558c3127785656398e3b3bd7da5e5a5a6",
+  "seed": 17,
+  "temperature": 0,
+  "evaluator_exit": 1,
+  "trial_count": 1,
+  "official_score": 0.0,
+  "measured": true,
+  "reward": 0.0,
+  "kind": "ok",
+  "seconds": 252,
+  "export_record": true,
+  "manifest_present": true,
+  "task_exported": true,
+  "file_count": 0,
+  "skipped_count": 0,
+  "declared_zip_exported": false,
+  "review_status": "empty",
+  "review_refused": true,
+  "tokens": {
+    "input": 12789,
+    "output": 81,
+    "cache": 5815
+  },
+  "capture_present": true,
+  "capture_error": false,
+  "capture_files": 0,
+  "declared_zip_captured": false,
+  "exception": null,
+  "observed_log_markers": [
+    "context_limit",
+    "http_4xx",
+    "export_empty"
+  ],
+  "run_id": 45340782388,
+  "run_attempt": 1,
+  "commit": "ce7abfe1ea8968e0cd777793558aaa5b4903152b"
+}

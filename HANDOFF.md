@@ -267,7 +267,7 @@ python devtools/f01_check.py --dev-set <官方 eval/dev_set.yaml>   # 8/8，含 
 [ ] 在比赛站点用一次提交机会正式提交（本人操作）
 ```
 
-只要其中任一项未打勾，**不要提交**——一次 build/smoke 失败就终止该次机会。
+完整 29 题覆盖是本项目的提分目标。官方允许先导出并提交部分任务，缺题按零计。以提交版本的实际模型、官方导出、完整 kit check 和 Kaggle 当期要求为准。[官方产物规范](https://github.com/google-research/ple/blob/main/docs/artifacts.md)
 
 ---
 

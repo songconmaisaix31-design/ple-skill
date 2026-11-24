@@ -1,0 +1,154 @@
+{
+  "planned": 12,
+  "regraded": 12,
+  "complete_transcripts": 12,
+  "source_exposures": 12,
+  "candidate_interface_uses": 6,
+  "candidate_patch_attempts": 24,
+  "candidate_accepted_patches": 0,
+  "candidate_tool_responses": 24,
+  "candidate_text_responses": 0,
+  "git_shas": [
+    "216e496da21863fd69fcdd347faa1ce753b13148"
+  ],
+  "generated_response_hashes": {
+    "j/1/text-source": [],
+    "j/1/patch-source": [
+      {
+        "call": 2,
+        "interface": "run_python_arguments",
+        "sha256": "599ce5ed4adc71f1822f6019f51533403bbfafdbc0a60170f8c822623f77fae3"
+      },
+      {
+        "call": 3,
+        "interface": "run_python_arguments",
+        "sha256": "fec045e6dbe925b28987410824f0f22996a16d488d72385da38e7d3ce58dc6d1"
+      },
+      {
+        "call": 4,
+        "interface": "run_python_arguments",
+        "sha256": "4395d9b5a9bc0491ac857c12bca28145b199d390641c84d419fb0cf5ce30ab6c"
+      }
+    ],
+    "j/2/text-source": [],
+    "j/2/patch-source": [
+      {
+        "call": 2,
+        "interface": "run_python_arguments",
+        "sha256": "e150bf3f364deadc74ecf75a781c16aefc796db92217155a14834cbf7dbe6676"
+      },
+      {
+        "call": 3,
+        "interface": "run_python_arguments",
+        "sha256": "dc5ba0fb99f32ca2d61d110b58d15e2a1291e811f995b68f3ae2784eade9ee4f"
+      },
+      {
+        "call": 4,
+        "interface": "run_python_arguments",
+        "sha256": "00347f30f1799cb4fb2bac48f74ea57fd22c9d6d7274e46c16cd3ec065007bde"
+      },
+      {
+        "call": 5,
+        "interface": "run_python_arguments",
+        "sha256": "00347f30f1799cb4fb2bac48f74ea57fd22c9d6d7274e46c16cd3ec065007bde"
+      }
+    ],
+    "j/3/text-source": [],
+    "j/3/patch-source": [
+      {
+        "call": 2,
+        "interface": "run_python_arguments",
+        "sha256": "213e454ed459d6989770ddbb42bf3acb1ea7defb489173124db1a433f516839a"
+      },
+      {
+        "call": 3,
+        "interface": "run_python_arguments",
+        "sha256": "a7b3c405d7bf5e75c39341db11e321605f37692f586de237e3f4eb6e0306ccc9"
+      },
+      {
+        "call": 4,
+        "interface": "run_python_arguments",
+        "sha256": "8f05a89cd6f0cf6934db8d10ba8b5d0c7416379144ea8f04ab9472d54138d5c0"
+      },
+      {
+        "call": 5,
+        "interface": "run_python_arguments",
+        "sha256": "8f05a89cd6f0cf6934db8d10ba8b5d0c7416379144ea8f04ab9472d54138d5c0"
+      },
+      {
+        "call": 6,
+        "interface": "run_python_arguments",
+        "sha256": "8f05a89cd6f0cf6934db8d10ba8b5d0c7416379144ea8f04ab9472d54138d5c0"
+      },
+      {
+        "call": 7,
+        "interface": "run_python_arguments",
+        "sha256": "89fac2a33369f7ffd3f25ac3591967b0ecaba54f77952ba1795d0ddfc7e33863"
+      },
+      {
+        "call": 8,
+        "interface": "run_python_arguments",
+        "sha256": "89fac2a33369f7ffd3f25ac3591967b0ecaba54f77952ba1795d0ddfc7e33863"
+      }
+    ],
+    "k/1/text-source": [],
+    "k/1/patch-source": [
+      {
+        "call": 2,
+        "interface": "run_python_arguments",
+        "sha256": "52106c03e2378a16562370bd0e5b887637ef399528908505197d3b39dbd8e089"
+      },
+      {
+        "call": 3,
+        "interface": "run_python_arguments",
+        "sha256": "f32fcf6ec56ee97a15f8ad47bf325a8ec7d0d70e5b759864259e33d726e78734"
+      },
+      {
+        "call": 4,
+        "interface": "run_python_arguments",
+        "sha256": "124f0d91b8e766d98d747886f99d298e31594c5fd4ed8ff98a7bc5524dce999a"
+      },
+      {
+        "call": 5,
+        "interface": "run_python_arguments",
+        "sha256": "36716f7004f5bf7f6cbb1bcb35b3cdf3931d025ab959c484d5760b0a2d8cd34f"
+      }
+    ],
+    "k/2/text-source": [],
+    "k/2/patch-source": [
+      {
+        "call": 2,
+        "interface": "run_python_arguments",
+        "sha256": "c1ad89efa533e60a69eeb864e50083c898ac669fa611e49b6aefad89b2525cdd"
+      },
+      {
+        "call": 3,
+        "interface": "run_python_arguments",
+        "sha256": "f5d46d93b604d821317907ac9d5b862656d39cbd9d74cfde0d544230dbc0f767"
+      },
+      {
+        "call": 4,
+        "interface": "run_python_arguments",
+        "sha256": "f32fcf6ec56ee97a15f8ad47bf325a8ec7d0d70e5b759864259e33d726e78734"
+      },
+      {
+        "call": 5,
+        "interface": "run_python_arguments",
+        "sha256": "c210d68204e795359087bd143f2d7262c4a05847915e8a42b7e6082cc4ca685a"
+      }
+    ],
+    "k/3/text-source": [],
+    "k/3/patch-source": [
+      {
+        "call": 2,
+        "interface": "run_python_arguments",
+        "sha256": "c1ad89efa533e60a69eeb864e50083c898ac669fa611e49b6aefad89b2525cdd"
+      },
+      {
+        "call": 3,
+        "interface": "run_python_arguments",
+        "sha256": "f32fcf6ec56ee97a15f8ad47bf325a8ec7d0d70e5b759864259e33d726e78734"
+      }
+    ]
+  }
+}

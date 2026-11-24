@@ -1,0 +1,13 @@
+case,repeat,arm,order,seed,score,feasible,optimal,measured,submitted_cost_cents,evidence_status,transcript_complete,requests_archived,responses_archived,git_sha,repair_requested,source_feedback_observed,source_line,completed_files,controlled_release_sec,repair_dispatch_sec,controlled_timing_valid,repair_response_completed,prompt_patch_interface_used,native_patch_interface_used,request_shape_valid,patch_responses_completed,patch_attempts,patch_accepted,tool_responses,native_tool_responses,native_argument_schema_valid,native_unindented_replacements,nonempty_text_responses,length_finished_responses
+l,1,patch-source,1,17,0.0,0,0,1,,regraded,1,6,5,b5d9defd791a22ad175d078d7aa6b055881fa73c,1,1,81,0,250.001,250.223,1,1,1,0,1,4,4,0,4,0,0,0,0,4
+l,1,native-patch,2,17,0.0,0,0,1,,regraded,1,12,11,b5d9defd791a22ad175d078d7aa6b055881fa73c,1,1,81,0,250.002,250.219,1,1,0,1,1,10,10,0,10,10,10,0,0,0
+l,2,patch-source,2,17,0.0,0,0,1,,regraded,1,6,5,b5d9defd791a22ad175d078d7aa6b055881fa73c,1,1,81,0,250.001,250.259,1,1,1,0,1,4,4,0,4,0,0,0,0,4
+l,2,native-patch,1,17,0.0,0,0,1,,regraded,1,12,11,b5d9defd791a22ad175d078d7aa6b055881fa73c,1,1,81,0,250.002,250.219,1,1,0,1,1,10,10,0,10,10,10,0,0,0
+l,3,patch-source,1,17,0.0,0,0,1,,regraded,1,6,5,b5d9defd791a22ad175d078d7aa6b055881fa73c,1,1,81,0,250.002,250.224,1,1,1,0,1,4,4,0,4,0,0,0,0,4
+l,3,native-patch,2,17,0.0,0,0,1,,regraded,1,12,11,b5d9defd791a22ad175d078d7aa6b055881fa73c,1,1,81,0,250.002,250.23,1,1,0,1,1,10,10,0,10,10,10,0,0,0
+m,1,patch-source,2,17,0.0,0,0,1,,regraded,1,6,5,b5d9defd791a22ad175d078d7aa6b055881fa73c,1,1,81,0,250.001,250.222,1,1,1,0,1,4,4,0,4,0,0,0,0,4
+m,1,native-patch,1,17,0.0,0,0,1,,regraded,1,12,11,b5d9defd791a22ad175d078d7aa6b055881fa73c,1,1,81,0,250.002,250.223,1,1,0,1,1,10,10,0,10,10,10,0,0,0
+m,2,patch-source,1,17,0.0,0,0,1,,regraded,1,6,5,b5d9defd791a22ad175d078d7aa6b055881fa73c,1,1,81,0,250.002,250.295,1,1,1,0,1,4,4,0,4,0,0,0,0,4
+m,2,native-patch,2,17,0.0,0,0,1,,regraded,1,10,9,b5d9defd791a22ad175d078d7aa6b055881fa73c,1,1,81,0,250.002,250.293,1,1,0,1,1,8,8,0,8,8,8,0,0,0
+m,3,patch-source,2,17,0.0,0,0,1,,regraded,1,6,5,b5d9defd791a22ad175d078d7aa6b055881fa73c,1,1,81,0,250.002,250.474,1,1,1,0,1,4,4,0,4,0,0,0,0,4
+m,3,native-patch,1,17,0.0,0,0,1,,regraded,1,11,10,b5d9defd791a22ad175d078d7aa6b055881fa73c,1,1,81,0,250.001,250.226,1,1,0,1,1,9,9,0,9,9,9,0,0,0
