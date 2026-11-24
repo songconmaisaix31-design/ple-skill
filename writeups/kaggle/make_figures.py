@@ -130,7 +130,7 @@ def score_vs_cost(out, observations, records):
     b.set_xticks([5000, 6000, 7000, 8000])
     handles = [Line2D([], [], color=c, marker=m, linestyle="none", label=l) for l,c,m in zip(ARMS,(MUTED,TEAL),("o","s"))]
     b.legend(handles=handles, frameon=False, loc="upper right", fontsize=9.5)
-    fig.text(.055, .095, "Each diagnostic point averages six runs on two inputs. All used the same 395-second deadline.", size=11.5)
+    fig.text(.055, .095, "Each point on the right averages six runs on two inputs, all scored at 395 seconds.", size=11.5)
     fig.text(.055, .053, "Usage excludes unfinished responses whose token counts were unavailable. Monetary charges were unavailable.", size=10.5, color=MUTED)
     fig.savefig(out / "score-vs-cost.png", dpi=160)
     plt.close(fig)
@@ -174,7 +174,8 @@ def outcomes(out, data):
         ax.text(counted[key]+.45, j, f"{counted[key]} / {n}", va="center", size=13, weight="bold")
     ax.set(yticks=range(len(ordered)), yticklabels=ordered, xlim=(0, n+2.5), xlabel="Number of distinct public tasks")
     ax.invert_yaxis()
-    ax.xaxis.set_major_locator(MaxNLocator(nbins=6,integer=True))
+    ticks = MaxNLocator(nbins=5, integer=True).tick_values(0, n)
+    ax.set_xticks([tick for tick in ticks if 0 <= tick < n] + [n])
     ax.spines[["top","left","right"]].set_visible(False)
     ax.tick_params(axis="y", length=0, pad=8)
     ax.grid(axis="x", alpha=.13)
