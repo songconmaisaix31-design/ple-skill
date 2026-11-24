@@ -1,0 +1,13 @@
+case,repeat,arm,score,reason,cost,feedback,completed_retries,repeated,calls,unindented,accepted,first_accepted_sec,schema_sha256
+p,1,native-feedback,0.0,output must contain exactly schedule.csv and summary.json,,5,5,5,10,0,0,,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+p,1,native-actionable,1.0,minimum-cost schedule,80,2,2,0,5,2,2,299.624,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+p,2,native-feedback,0.0,output must contain exactly schedule.csv and summary.json,,6,5,5,11,0,0,,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+p,2,native-actionable,1.0,minimum-cost schedule,80,4,4,2,8,2,2,317.222,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+p,3,native-feedback,0.0,output must contain exactly schedule.csv and summary.json,,5,5,5,10,0,0,,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+p,3,native-actionable,1.0,minimum-cost schedule,80,2,2,0,5,2,2,299.155,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+q,1,native-feedback,0.0,output must contain exactly schedule.csv and summary.json,,4,3,2,7,0,0,,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+q,1,native-actionable,0.0,output must contain exactly schedule.csv and summary.json,,2,2,1,4,1,1,323.152,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+q,2,native-feedback,0.0,output must contain exactly schedule.csv and summary.json,,6,5,5,11,0,0,,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+q,2,native-actionable,0.0,output must contain exactly schedule.csv and summary.json,,5,4,3,9,1,1,337.672,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+q,3,native-feedback,0.0,output must contain exactly schedule.csv and summary.json,,5,5,5,10,0,0,,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
+q,3,native-actionable,1.0,minimum-cost schedule,54,4,4,2,8,2,2,296.403,4ea23281cf0eca6ae4b86f55f7d8974a2c2fc5ef49b95b017dfad2bb64034f75
