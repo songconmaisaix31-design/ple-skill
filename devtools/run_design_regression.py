@@ -253,12 +253,12 @@ def first_code_action(lines):
     return None
 
 
-ARCHIVE_VARIANTS = ("d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s")
-CONTROLLED_VARIANTS = ("h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s")
-PATCH_VARIANTS = ("j", "k", "l", "m", "n", "o", "p", "q", "r", "s")
-NATIVE_PATCH_VARIANTS = ("l", "m", "n", "o", "p", "q", "r", "s")
-NATIVE_FEEDBACK_VARIANTS = ("n", "o", "p", "q", "r", "s")
-NATIVE_ACTIONABLE_VARIANTS = ("p", "q", "r", "s")
+ARCHIVE_VARIANTS = ("d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u")
+CONTROLLED_VARIANTS = ("h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u")
+PATCH_VARIANTS = ("j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u")
+NATIVE_PATCH_VARIANTS = ("l", "m", "n", "o", "p", "q", "r", "s", "t", "u")
+NATIVE_FEEDBACK_VARIANTS = ("n", "o", "p", "q", "r", "s", "t", "u")
+NATIVE_ACTIONABLE_VARIANTS = ("p", "q", "r", "s", "t", "u")
 CONTROLLED_RELEASE_SEC = 250
 CONTROLLED_ARCHIVE_SHA256 = "511905b2bc72f17b92abf364eade2e2cfd2b060b86419796197f37968b5204e7"
 CONTROLLED_SOURCE_SHA256 = "eba7247453712a78c991e152dd1e4bf08d80474429601e25ec7ae6fd6fbb7381"
@@ -347,7 +347,7 @@ def apply_constrained_patch(source, raw):
         return None, event
 
 
-def controlled_program():
+def controlled_program(variant=None):
     """Recover the frozen real model program and remove only COMMENT tokens."""
     evidence = Path(__file__).resolve().parents[1] / "docs/experiments/paired-storage-v1/evidence.zip"
     data = evidence.read_bytes()
@@ -373,6 +373,10 @@ def controlled_program():
     program = "\n".join(lines)
     if hashlib.sha256(program.encode()).hexdigest() != CONTROLLED_PROGRAM_SHA256:
         raise ValueError("controlled replay normalized program changed")
+    if variant in ("t", "u"):
+        program = program.replace("sum(c[0] for c in combination)", "sum(pump_quantities)")
+        if hashlib.sha256(program.encode()).hexdigest() != "49fc544ce7b500a9c4058576cf179c6c5e48d94577f329157723451ffaa89930":
+            raise ValueError("undefined-name fixture drifted")
     return program
 
 
@@ -738,7 +742,7 @@ async def measure(workspace, variant, seconds, kit_root, check_transport=False, 
                                      ControlledNativePatchModel if controlled_native_patch else
                                      ControlledPatchModel if controlled_patch else ControlledFirstModel)
                     wrapper = wrapper_class(
-                        configured_model(), controlled_program(),
+                        configured_model(), controlled_program(variant),
                         lambda: time.monotonic() - started, archive, model_attempts, first_events)
                     stack.enter_context(patch("serve.from_env", return_value=wrapper))
             async with websockets.serve(solve, "127.0.0.1", 0, max_size=16 * 1024 * 1024,

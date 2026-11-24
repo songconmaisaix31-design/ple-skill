@@ -1,4 +1,5 @@
 """Regrade original P/Q Actions bundles. Run from the repository root."""
+import argparse
 import csv
 import hashlib
 import json
@@ -17,7 +18,7 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def trial(bundle, case, repeat, arm, protocol, protocol_hash):
+def trial(bundle, case, repeat, arm, protocol, protocol_hash, run_sha):
     prefix = arm + "/"
 
     def read(name):
@@ -28,7 +29,7 @@ def trial(bundle, case, repeat, arm, protocol, protocol_hash):
     expected_first = protocol["design"]["first_arm"][case][str(repeat)]
     hashes = protocol["cases"][case]["input_sha256"]
     for key, value in dict(mode=arm, variant=case, repeat=repeat, first_mode=expected_first,
-                           order=1 if arm == expected_first else 2, git_sha=SHA, seed=17,
+                           order=1 if arm == expected_first else 2, git_sha=run_sha, seed=17,
                            temperature=0, model="gemma-4-26b", protocol_sha256=protocol_hash).items():
         require(meta[key] == value, key)
     for name, expected in hashes.items():
@@ -96,20 +97,25 @@ def trial(bundle, case, repeat, arm, protocol, protocol_hash):
 
 
 def main():
-    data = (ROOT / "protocol.json").read_bytes()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--replication", action="store_true", help="replay the R/S replication")
+    replication = parser.parse_args().replication
+    root = ROOT.with_name("actionable-replication-v1") if replication else ROOT
+    run_sha = "96f19575311504ba4f4327e9ca6708bc3cd87a48" if replication else SHA
+    data = (root / "protocol.json").read_bytes()
     protocol = json.loads(data)
-    manifest = json.loads((ROOT / "attempts/manifest.json").read_text())
+    manifest = json.loads((root / "attempts/manifest.json").read_text())
     rows, diffs = [], []
-    for case in ("p", "q"):
+    for case in protocol["split"]["new_diagnostic_inputs"]:
         for repeat in (1, 2, 3):
-            path = ROOT / "attempts" / f"ple-replication-{case}-{repeat}-attempt-1.zip"
+            path = root / "attempts" / f"ple-replication-{case}-{repeat}-attempt-1.zip"
             require(digest(path.read_bytes()) == manifest[path.name]["sha256"], "artifact checksum")
             with ZipFile(path) as bundle:
                 for arm in ("native-feedback", "native-actionable"):
-                    rows.append(trial(bundle, case, repeat, arm, protocol, digest(data)))
+                    rows.append(trial(bundle, case, repeat, arm, protocol, digest(data), run_sha))
             diffs.append(rows[-1]["score"] - rows[-2]["score"])
     require(len({r["schema_sha256"] for r in rows}) == 1, "cross-arm tool drift")
-    with (ROOT / "trials.csv").open("w", newline="") as f:
+    with (root / "trials.csv").open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=rows[0])
         writer.writeheader()
         writer.writerows(rows)

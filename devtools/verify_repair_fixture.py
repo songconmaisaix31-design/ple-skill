@@ -81,11 +81,14 @@ def check(protocol, prior):
     spec = protocol["source"]
     raw = archived_source(prior, spec)
     program = strip_comments(raw)
-    assert digest(program.encode()) == spec["controlled_source_sha256"]
     old = "sum(c[0] for c in combination)"
     assert program.count(old) == 1
     # Host-only positive control. Neither replacement nor reference values enter a task.
     known_fix = program.replace(old, "sum(combination)")
+    if protocol["id"] == "actionable-name-error-v1":
+        from run_design_regression import controlled_program
+        program = controlled_program("t")
+    assert digest(program.encode()) == spec["controlled_source_sha256"]
     with tempfile.TemporaryDirectory() as tmp:
         for name, item in protocol["cases"].items():
             case = Site(*item["site"][:-1], tuple(item["site"][-1])), tuple(Period(*v) for v in item["periods"])
@@ -102,7 +105,10 @@ def check(protocol, prior):
                 if version != "offline-positive":
                     frames = re.findall(r'^  File "<run_python>", line (\d+)', run.stderr, re.M)
                     assert run.returncode == 1 and frames[-1] == "81"
-                    assert run.stderr.splitlines()[-1] == "TypeError: 'int' object is not subscriptable"
+                    if version == "common-first-program" and protocol["id"] == "actionable-name-error-v1":
+                        assert run.stderr.splitlines()[-1].startswith("NameError: name 'pump_quantities' is not defined")
+                    else:
+                        assert run.stderr.splitlines()[-1] == "TypeError: 'int' object is not subscriptable"
                     assert not (work / "output").exists() and not scored["feasible"] and scored["score"] == 0
                 else:
                     assert run.returncode == 0 and scored["optimal"] and scored["score"] == 1

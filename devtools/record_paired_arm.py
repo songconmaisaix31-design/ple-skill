@@ -31,11 +31,11 @@ raw, destination = map(Path, sys.argv[1:3])
 arm, position, first_arm, phase, status = sys.argv[3:]
 status = int(status)
 variant = os.environ["VARIANT"]
-controlled_trial = variant in ("h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s")
-patch_trial = variant in ("j", "k", "l", "m", "n", "o", "p", "q", "r", "s")
-native_patch_trial = variant in ("l", "m", "n", "o", "p", "q", "r", "s")
-native_feedback_trial = variant in ("n", "o", "p", "q", "r", "s")
-native_actionable_trial = variant in ("p", "q", "r", "s")
+controlled_trial = variant in ("h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u")
+patch_trial = variant in ("j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u")
+native_patch_trial = variant in ("l", "m", "n", "o", "p", "q", "r", "s", "t", "u")
+native_feedback_trial = variant in ("n", "o", "p", "q", "r", "s", "t", "u")
+native_actionable_trial = variant in ("p", "q", "r", "s", "t", "u")
 key = os.environ["MODEL_PROXY_KEY"].encode()
 inputs = ("case/task.md", "case/input/site.json", "case/input/periods.csv")
 outputs = ("case/output/schedule.csv", "case/output/summary.json")
@@ -74,7 +74,8 @@ grade = (report or {}).get("grade")
 checkpoint = (report or {}).get("checkpoint") or {}
 run_sha = os.environ["GITHUB_SHA"]
 repair_trial = variant in ("f", "g") or controlled_trial
-experiment = ("actionable-replication-v1" if variant in ("r", "s") else
+experiment = ("actionable-name-error-v1" if variant in ("t", "u") else
+              "actionable-replication-v1" if variant in ("r", "s") else
               "actionable-feedback-v1" if native_actionable_trial else
               "native-feedback-v1" if native_feedback_trial else
               "native-patch-v1" if native_patch_trial else
@@ -126,7 +127,7 @@ if io_file.is_file() and archive.get("complete") is True and not io_redacted:
                 match = re.fullmatch(r"```python\n(.*?)\n```", content or "", re.DOTALL)
                 controlled_source_valid = bool(
                     match and hashlib.sha256(match[1].encode()).hexdigest()
-                    == "f4ece9d6d7e41e93f364db640b51b50c12c947ce1639fd2af991007dd76364f2")
+                    == protocol["source"]["controlled_source_sha256"])
                 release_sec = scripted_first[0].get("end_sec") if len(scripted_first) == 1 else None
                 repair_dispatch_sec = repair[0].get("start_sec") if repair else None
                 timing_valid = (type(release_sec) in (int, float)
