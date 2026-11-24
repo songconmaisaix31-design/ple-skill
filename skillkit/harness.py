@@ -25,7 +25,7 @@ WRAP_BUDGET = 0.80      # switch to "close it out" mode
 FINAL_BUDGET = 0.98     # leave time for the WebSocket done frame
 CHECKPOINT_TIMEOUT = 10
 
-def mask_old_tool_results(messages):
+def mask_old_tool_results(messages, *, limit_recent=False):
     positions = [i for i, message in enumerate(messages) if message.get("role") == "tool"]
     view = list(messages)
     count = 0
@@ -34,7 +34,17 @@ def mask_old_tool_results(messages):
         if isinstance(content, str) and len(content) > 256:
             view[i] = {**messages[i], "content": "[Earlier tool output omitted. Read the file again if needed.]"}
             count += 1
-    return view, count
+    trimmed = 0
+    if limit_recent:
+        notice = "\n[Tool output shortened. Use a narrower query to inspect the omitted section.]\n"
+        left = (4096 - len(notice)) // 2
+        right = 4096 - len(notice) - left
+        for i in positions[-2:]:
+            content = messages[i].get("content")
+            if isinstance(content, str) and len(content) > 4096:
+                view[i] = {**messages[i], "content": content[:left] + notice + content[-right:]}
+                trimmed += 1
+    return view, count, trimmed
 
 
 NAMED_TEXT_INPUT = re.compile(
@@ -574,7 +584,11 @@ class Harness:
                 wrap_at = None
             request_messages = messages
             if os.environ.get("PLE_MASK_OLD_TOOL_RESULTS") == "1":
-                request_messages, masked = mask_old_tool_results(messages)
+                request_messages, masked, trimmed = mask_old_tool_results(
+                    messages, limit_recent=os.environ.get("PLE_LIMIT_RECENT_TOOL_RESULTS") == "1"
+                )
+                if trimmed:
+                    on_log("trimmed recent tool observations")
                 if masked:
                     on_log("masked historical tool observations")
             try:

@@ -4,7 +4,7 @@
 
 A small change to a tool response helped an engineering agent finish four of six pump-scheduling runs on each of two pairs of held-out inputs. On a different programming error, the same change yielded five accepted edits and zero working deliveries. This difference emerged when we scored the files on disk at a fixed deadline. It would have been easy to miss by counting successful tool calls.
 
-These experiments use original scheduling problems. On the public PLE development set, three Gemma runs on the same structural task scored 0.000. The second and third runs captured zero output files. A file-level regrade remains unavailable. The other 28 tasks have no observed score in this evidence set.
+These experiments use original scheduling problems. On the public PLE development set, four Gemma runs on the same structural task scored 0.000. The last three runs captured zero output files. A file-level regrade remains unavailable. The other 28 tasks have no observed score in this evidence set.
 
 ## From instructions to an engineering deliverable
 
@@ -36,13 +36,15 @@ On R/S the baseline used a mean of 6,720 reported input plus output tokens per r
 
 ![Score versus reported token usage, with public dev measurements separated from original diagnostics.](media/score-vs-cost.png)
 
+Masking older tool observations activated in the fourth wind run. The model used 123,554 input and 3,706 output tokens in 2,107 seconds. The evaluator again recorded zero and captured no files. The last two runs shared task and weight hashes but used different hosted runner images. One observation per setting is insufficient to estimate a paired variance or a reliable cost effect. [Fourth run](https://github.com/songconmaisaix31-design/ple-skill/actions/runs/45361598868)
+
 ## How far do the results transfer?
 
 | Model and role | Public PLE development evidence in this snapshot | Original paired diagnostics |
 |---|---|---|
-| Gemma 4 26B A4B, local GGUF on a GitHub Actions CPU | One checks-only task scored 0.000 three times. No LLM judge was required. | 36 scored arms across P/Q, R/S and T/U |
+| Gemma 4 26B A4B, local GGUF on a GitHub Actions CPU | One checks-only task scored 0.000 four times. No LLM judge was required. | 36 scored arms across P/Q, R/S and T/U |
 | GLM 5.2, repository-declared target at the time of analysis | No comparable scored run recorded | No matched comparison on these inputs |
 
-A full 29-task cross-model comparison remains unmeasured. Figure 3 counts distinct public tasks. All three public run records cover the same measured task. The other 28 lack an observed task outcome. Overall performance and hidden-test ranking remain unknown.
+A full 29-task cross-model comparison remains unmeasured. Figure 3 counts distinct public tasks. All four public run records cover the same measured task. The other 28 lack an observed task outcome. Overall performance and hidden-test ranking remain unknown.
 
 ![Observed outcomes and measurement coverage across the 29 public PLE development tasks.](media/dev-failures.png)
